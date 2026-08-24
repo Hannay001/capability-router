@@ -18,18 +18,18 @@ Do exactly these steps:
 3. Run its installer, which also auto-detects every AI coding harness installed
    on this machine (Claude Code, Codex, Cursor, Jcode, Hermes, OpenCode,
    Gemini, or anything else) and binds cap to them automatically:
-   cd ~/capability-router && ./install.sh
+   cd ~/cap && ./install.sh
 4. Build the capability index:
-   ~/capability-router/scripts/capability-registry snapshot-runtimes
-   ~/capability-router/scripts/capability-registry rebuild
+   ~/cap/scripts/capability-registry snapshot-runtimes
+   ~/cap/scripts/capability-registry rebuild
 5. Run the health check:
-   ~/capability-router/scripts/capability-registry doctor
+   ~/cap/scripts/capability-registry doctor
 
 Then report back to me in plain language:
 - which AI harnesses you found on this machine and how many skills each has,
 - the total number of capabilities indexed,
 - one example of a task I could route, using:
-   ~/capability-router/scripts/capability-registry route --stdin <<'TASK'
+   ~/cap/scripts/capability-registry route --stdin <<'TASK'
    fix a failing test in my project
    TASK
 

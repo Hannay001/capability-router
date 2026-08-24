@@ -19,8 +19,7 @@ prompt-injection firewall.*
 
 - [x] De-personalized core: no hardcoded users, projects, or pinned paths.
 - [x] `cap` CLI name (`capability-registry` kept as an alias).
-- [ ] Project policy becomes config-driven (any `config/<name>.toml`), not an
-      allowlist of one internal project.
+- [x] Project policy is config-driven (any `config/<name>.toml`).
 - [x] Bundle lane heuristics read optional declarative **policy packs**
       (`policies/<project>.json`) instead of hardcoded capability names.
 - [x] MIT license, CI on Python 3.11–3.14, real README.
@@ -34,7 +33,7 @@ prompt-injection firewall.*
 - [ ] Native Windows story: symlink privilege docs vs junction fallback,
       sys.platform-guarded integration tests, windows-latest CI job.
 
-## v1.1 — Audit firewall (`cap audit`)
+## v1.1 — Audit firewall (`cap audit`) — SHIPPED
 
 Static, stdlib-only analysis of any skill/plugin/MCP definition:
 

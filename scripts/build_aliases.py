@@ -7,7 +7,7 @@ Two sources, merged:
    Those are the exact domain terms a user types, authored by the plugin's own maintainer.
    Free, high precision, and it is what makes exact domain-term queries reach the right entrypoint.
 
-2. SEMANTIC (graphify, separate pass): community detection over the cleaned corpus supplies
+2. SEMANTIC (the community-detection pass, separate pass): community detection over the cleaned corpus supplies
    cross-vocabulary synonyms for the English surface -- "who else is doing this commercially"
    -> competitive-analysis. Merged in under the same schema; this script never clobbers
    external community-detection pass synonyms, it only adds its own.
@@ -166,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
         aliases[record["id"]] = entry
         seeded += 1
 
-    # Carry forward every graphify-authored entry we did not regenerate.
+    # Carry forward every community-detection-authored entry we did not regenerate.
     live_ids = {record["id"] for record in records}
     carried = 0
     for capability_id, entry in previous.items():
@@ -178,7 +178,7 @@ def main(argv: list[str] | None = None) -> int:
     payload = {
         "schema_version": 1,
         "generated_at": registry.utc_now(),
-        "source": "plugin.json keywords (deterministic) + graphify (semantic)",
+        "source": "plugin.json keywords (deterministic) + the community-detection pass (semantic)",
         "aliases": dict(sorted(aliases.items())),
     }
     destination = output / "aliases.json"

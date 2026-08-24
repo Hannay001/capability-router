@@ -3,7 +3,12 @@
 source=$0
 case $source in
     */*) ;;
-    *) source=$(command -v "$source") || exit 1 ;;
+    *)
+        source=$(command -v "$source") || {
+            echo "capability-registry: cannot resolve script location" >&2
+            exit 1
+        } ;;
+
 esac
 link_hops=0
 while [ -L "$source" ]; do

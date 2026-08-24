@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Materialize the CLEANED capability surface as a folder of files for graphify.
+"""Materialize the CLEANED capability surface as a folder of files for the community-detection pass.
 
 Deliberately built from registry *records*, not from the raw skill directories:
 
@@ -9,7 +9,7 @@ Deliberately built from registry *records*, not from the raw skill directories:
 - The record metadata (name + description + category) IS the surface the router scores
   against. Graphing anything else would map a corpus the router never sees.
 
-Output: one small markdown file per capability, which graphify ingests to produce
+Output: one small markdown file per capability, which the community-detection pass ingests to produce
 communities, semantic-duplicate edges, and the synonyms that feed aliases.json.
 """
 

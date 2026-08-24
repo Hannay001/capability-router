@@ -1,5 +1,8 @@
 # cap
 
+[![tests](https://github.com/Hannay001/cap/actions/workflows/tests.yml/badge.svg)](https://github.com/Hannay001/cap/actions/workflows/tests.yml)
+
+
 **The package manager and trust layer for your AI agent's capabilities.**
 
 `cap` indexes every skill, MCP server, plugin, tool, agent, and command installed
@@ -7,7 +10,7 @@ across your coding agents (Claude Code, Codex, Cursor, OpenCode, Hermes, Jcode),
 routes any task to a **bounded portfolio** of the right capabilities, and audits
 everything it touches with a built-in **prompt-injection firewall**.
 
-> Your agent doesn't need all 500 capabilities in context.
+> Your agent doesn't need your installed capabilities in context.
 > It needs the right 8, verified safe, for this task.
 
 ```bash
@@ -67,8 +70,8 @@ machine, builds the index, and reports back in plain language.
 ### Way 2 — terminal, zero manual wiring
 
 ```sh
-git clone https://github.com/<you>/cap.git
-cd capability-router
+git clone https://github.com/Hannay001/cap.git
+cd cap
 ./install.sh        # symlinks `cap`, then auto-detects and binds every harness on this machine
 cap snapshot-runtimes
 cap rebuild
@@ -113,8 +116,10 @@ cap audit ~/Downloads/some-skill --recursive --strict
 Verdicts: `clean` / `suspect` / `hostile`. With `--strict`, exit codes gate
 installs and CI: 0 / 1 / 2. A missing or non-auditable target under `--strict`
 also fails the gate. First-party docs that quote attack patterns can carry a
-`cap-audit-suppress` marker on a line; every marker usage is itself reported
-as a high finding, so a suppressed file can never audit clean.
+`cap-audit-suppress` marker on a line. Outside cap's own repository the
+marker is inert and its presence is reported as a high finding; inside the
+repo, quoted attack patterns may be suppressed and each usage is still
+surfaced as a medium finding.
 
 Every JSON finding carries a `taxonomy` tag from the SkillTrustBench
 T01-T09 categories (instruction hijacking, memory poisoning, network egress,
@@ -168,6 +173,11 @@ Structural paths come from `config/default.toml`; add per-project overlays as
 routing policy (deny lists, required-context lanes) lives in declarative
 **policy packs**: `policies/<project>.json`. See
 [policies/example.json](policies/example.json).
+
+`cap snapshot-runtimes` and `cap rebuild` write runtime inventory to a
+machine-local state dir (`~/.local/state/cap/`), never into your clone. The
+copies under `data/snapshots/` are read-only seeds used before the first
+snapshot run, so `git status` stays clean after normal use.
 
 The optional semantic sidecar (`embedder/`) adds embedding re-ranking on top of
 lexical scoring; everything works without it.
