@@ -17,10 +17,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
+import tempfile
+import time
 import unicodedata
 import urllib.request
+
+if sys.version_info < (3, 11):
+    raise SystemExit("cap audit requires Python 3.11 or newer")
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Optional
@@ -46,6 +52,8 @@ RULE_TAXONOMY: dict[str, str] = {
     "hidden_directive_text": "T01/T02",
     "unclosed_comment_directive": "T01/T02",
     "vulnerable_dependency": "T08",
+    "unpinned_dependencies": "T08",
+    "pycache_artifact": "",
     "invisible_unicode": "T01",
     "homoglyph_mixing": "T01",
     "exfiltration_pipeline": "T03",
@@ -250,7 +258,10 @@ class FileReport:
     findings: list[Finding] = field(default_factory=list)
 
 
-_ANSI_ESCAPE_RE = re.compile(r"\x1b(?:[@-_][0-?]*[ -/]*[@-~]|[\x80-\x9f])")
+_ANSI_ESCAPE_RE = re.compile(
+    r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?"  # OSC (incl. OSC 52 clipboard writes)
+    r"|\x1b(?:[@-_][0-?]*[ -/]*[@-~]|[\x80-\x9f])"
+)
 _C0_C1_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 _CREDENTIAL_RE = re.compile(
     r"(?i)(bearer\s+)[\w.=-]{8,}"
@@ -317,7 +328,12 @@ def _suppression_allowed(path: Path) -> bool:
 
     Only files inside cap's own repository may use cap-audit-suppress; for any
     other (potentially hostile) input the marker is inert and every rule fires.
+    The root must additionally look like a real checkout (contain .git): a
+    relocated/vendored copy of this file grants nobody first-party rights over
+    its surroundings.
     """
+    if not (_REPO_ROOT / ".git").exists():
+        return False
     try:
         path.resolve(strict=False).relative_to(_REPO_ROOT)
         return True
@@ -329,7 +345,14 @@ MAX_RULE_LINE_CHARS = 4096
 MAX_SPAN_SCAN_CHARS = 65_536
 
 
-def audit_bytes(path: Path, content: bytes) -> FileReport:
+def audit_bytes(
+    path: Path, content: bytes, *, allow_suppression: Optional[bool] = None
+) -> FileReport:
+    """Audit one in-memory payload.
+
+    allow_suppression=None derives the first-party default from the path;
+    an explicit False (e.g. hook mode) pins markers inert regardless.
+    """
     import hashlib
 
     sha256 = hashlib.sha256(content).hexdigest()
@@ -354,7 +377,8 @@ def audit_bytes(path: Path, content: bytes) -> FileReport:
     # which editors render inline and which would otherwise hide pipe characters
     # from line-based rules.
     lines = text.split("\n")
-    allow_suppression = _suppression_allowed(path)
+    if allow_suppression is None:
+        allow_suppression = _suppression_allowed(path)
     suppressed = {
         number
         for number, line in enumerate(lines, start=1)
@@ -461,8 +485,6 @@ def _verdict(findings: list[Finding]) -> str:
 
 def audit_path(path: Path) -> Optional[FileReport]:
     resolved = path.expanduser()
-    if "__pycache__" in resolved.parts:
-        return None  # interpreter bytecode cache, not shipped capability content
     if resolved.is_symlink():
         # A symlinked file can point anywhere (e.g. ~/.ssh/id_rsa); auditing it  # cap-audit-suppress
         # would hash and excerpt out-of-scope content.
@@ -470,6 +492,7 @@ def audit_path(path: Path) -> Optional[FileReport]:
     if not resolved.is_file():
         return None
     suffix = resolved.suffix.lower()
+    in_pycache = "__pycache__" in resolved.parts
     if suffix in BINARY_PAYLOAD_SUFFIXES:
         import hashlib
 
@@ -479,20 +502,33 @@ def audit_path(path: Path) -> Optional[FileReport]:
         except OSError:
             return None
         oversized_blob = resolved.stat().st_size > AUDIT_MAX_BYTES
-        findings = [
-            Finding(
-                rule_id="non_text_payload",
-                severity="high",
-                title=(
-                    f"Executable payload ({suffix}) shipped inside capability directory"
-                    + "; oversize, hash covers prefix only"
-                    if oversized_blob
-                    else f"Executable payload ({suffix}) shipped inside capability directory"
-                ),
-                line=0,
-                excerpt=f"sha256={hashlib.sha256(blob).hexdigest()[:16]}",
-            )
-        ]
+        # Bytecode caches (__pycache__) are build artifacts, but nothing inside
+        # them gets a free pass: caches are surfaced as informational findings,
+        # payloads anywhere else are floored to suspect, and text files inside
+        # __pycache__ fall through to the normal full scan below.
+        if in_pycache:
+            findings = [
+                Finding(
+                    rule_id="pycache_artifact",
+                    severity="info",
+                    title=f"Interpreter cache artifact ({suffix}) noted, not audited as content",
+                    line=0,
+                    excerpt=f"sha256={hashlib.sha256(blob).hexdigest()[:16]}",
+                )
+            ]
+        else:
+            findings = [
+                Finding(
+                    rule_id="non_text_payload",
+                    severity="high",
+                    title=(
+                        f"Executable payload ({suffix}) shipped inside capability directory"
+                        + ("; oversize, hash covers prefix only" if oversized_blob else "")
+                    ),
+                    line=0,
+                    excerpt=f"sha256={hashlib.sha256(blob).hexdigest()[:16]}",
+                )
+            ]
         digest = hashlib.sha256(blob).hexdigest()
         return FileReport(path=str(resolved), sha256=digest, verdict=_verdict(findings), findings=findings)
     if suffix not in AUDITABLE_SUFFIXES:
@@ -513,6 +549,8 @@ def audit_path(path: Path) -> Optional[FileReport]:
                         f"File exceeds {AUDIT_MAX_BYTES // (1024 * 1024)} MB; "
                         "tail not scanned (hash covers scanned prefix only)"
                     ),
+                    line=0,
+                    excerpt=f"size>{AUDIT_MAX_BYTES}",
                 )
             )
             if report.verdict == "clean":
@@ -557,17 +595,40 @@ _REQUIREMENT_RE = re.compile(
 _NPM_VERSION_RE = re.compile(r"\"(?P<name>@?[A-Za-z0-9][A-Za-z0-9._/-]*)\"\s*:\s*\"(?P<ver>\d[0-9A-Za-z.+~^-]*)\"")
 
 
-def parse_dependency_manifests(text: str, filename: str) -> list[tuple[str, str, str]]:
-    """Extract (ecosystem, name, version) triples from requirements.txt / package.json."""
+def parse_dependency_manifests(text: str, filename: str) -> tuple[list[tuple[str, str, str]], int]:
+    """Extract exact-pinned (ecosystem, name, version) triples from manifests.
+
+    Returns (deps, unpinned_count): requirements that name a package but are
+    not an exact pin are counted, never silently dropped.
+    """
     deps: list[tuple[str, str, str]] = []
+    unpinned = 0
     if filename == "requirements.txt":
-        for raw in text.split("\n"):
-            line = raw.split("#", 1)[0].strip()
+        text = text.lstrip("\ufeff")
+        lines = text.split("\n")
+        merged: list[str] = []
+        buffer = ""
+        for raw in lines:
+            candidate = (buffer + raw).split("#", 1)[0] if not buffer else buffer + raw
+            stripped = candidate.strip()
+            if stripped.endswith("\\"):
+                buffer = candidate.rstrip().rstrip("\\") + " "
+                continue
+            buffer = ""
+            merged.append(stripped)
+        for line in merged:
+            line = line.strip()
             if not line or line.startswith("-"):
-                continue  # comments and -r/--hash directives
+                continue  # comments and -r/--hash/--index-url directives
             match = _REQUIREMENT_RE.match(line)
             if match:
-                deps.append(("PyPI", match.group("name"), match.group("ver").rstrip(".*")))
+                version = match.group("ver")
+                if "*" in version:
+                    unpinned += 1  # wildcard pins query a nonexistent release
+                    continue
+                deps.append(("PyPI", match.group("name"), version))
+            elif re.match(r"^[A-Za-z0-9]", line):
+                unpinned += 1
     elif filename == "package.json":
         try:
             data = json.loads(text)
@@ -582,7 +643,9 @@ def parse_dependency_manifests(text: str, filename: str) -> list[tuple[str, str,
                     match = _NPM_VERSION_RE.search(f'"{name}": "{spec}"')
                     if match:
                         deps.append(("npm", name, match.group("ver")))
-    return deps
+                    else:
+                        unpinned += 1
+    return deps, unpinned
 
 
 def query_osv_batch(deps: list[tuple[str, str, str]]) -> dict[tuple[str, str, str], list[str]]:
@@ -604,10 +667,13 @@ def query_osv_batch(deps: list[tuple[str, str, str]]) -> dict[tuple[str, str, st
     with urllib.request.urlopen(request, timeout=15) as response:  # noqa: S310
         results = json.loads(response.read().decode("utf-8")).get("results", [])
     found: dict[tuple[str, str, str], list[str]] = {}
+    safe_id = re.compile(r"[^A-Za-z0-9._/-]").sub
     for dep, result in zip(deps, results, strict=False):
         vulns = result.get("vulns") if isinstance(result, dict) else None
         if vulns:
-            found[dep] = sorted({str(v.get("id", "?")) for v in vulns})[:5]
+            ids = sorted({safe_id("", str(v.get("id", "?")))[:64] for v in vulns if v.get("id")})
+            if ids:
+                found[dep] = ids[:5]
     return found
 
 
@@ -618,23 +684,40 @@ def dependency_findings(target: Path) -> tuple[list[Finding], list[str]]:
         return [], []
     manifests: dict[str, list[tuple[str, str, str]]] = {}
     manifest_paths: dict[str, Path] = {}
+    unpinned_counts: dict[str, int] = {}
     for candidate in sorted(resolved.rglob("*")):
         if "__pycache__" in candidate.parts or candidate.name not in ("requirements.txt", "package.json"):
             continue
         if not candidate.is_file() or candidate.is_symlink():
             continue
         try:
-            text = candidate.read_text(encoding="utf-8", errors="ignore")[:262_144]
+            text = candidate.read_text(encoding="utf-8-sig", errors="ignore")
+            truncated = len(text) > 262_144
         except OSError:
             continue
+        if truncated:
+            text = text[:262_144]
         key = f"{candidate}:{candidate.name}"
-        deps = parse_dependency_manifests(text, candidate.name)
-        if deps:
+        deps, unpinned = parse_dependency_manifests(text, candidate.name)
+        if deps or unpinned:
             manifests[key] = deps
             manifest_paths[key] = candidate
+            if unpinned:
+                unpinned_counts[key] = unpinned
 
     findings: list[Finding] = []
     checked: list[str] = []
+    for key, count in unpinned_counts.items():
+        origin = manifest_paths.get(key)
+        findings.append(
+            Finding(
+                rule_id="unpinned_dependencies",
+                severity="medium",
+                title=f"{count} requirement(s) not exactly pinned; CVE check skipped for them",
+                line=0,
+                excerpt=_sanitize_excerpt(str(origin or key)),
+            )
+        )
     flat: list[tuple[str, str, str]] = []
     owner: dict[tuple[str, str, str], str] = {}
     for key, deps in manifests.items():
@@ -644,7 +727,7 @@ def dependency_findings(target: Path) -> tuple[list[Finding], list[str]]:
                 flat.append(dep)
                 owner[dep] = key
     if not flat:
-        return [], checked
+        return findings, checked  # nothing to query, but unpinned counts still surface
     try:
         vuln_map = query_osv_batch(flat)
     except Exception as error:  # network unavailable: degrade loudly but cleanly
@@ -666,7 +749,9 @@ def dependency_findings(target: Path) -> tuple[list[Finding], list[str]]:
                 severity="high",
                 title=f"{dep[1]} {dep[2]} has known vulnerabilities ({dep[0]})",
                 line=0,
-                excerpt=f"{' '.join(vuln_ids)}  ({origin})" if origin else " ".join(vuln_ids),
+                excerpt=_sanitize_excerpt(
+                    re.sub(r"\s+", " ", f"{' '.join(vuln_ids)} ({origin})" if origin else ' '.join(vuln_ids)).strip()
+                ),
             )
         )
     return findings, checked
@@ -812,16 +897,21 @@ def run_audit_flow(
 
 
 def make_receipt(
-    reports: list[FileReport], skipped: Optional[list[str]] = None
+    reports: list[FileReport],
+    skipped: Optional[list[str]] = None,
+    targets: Optional[list[str]] = None,
 ) -> dict:
     from datetime import datetime, timezone
 
     return {
-        "schema": "cap.receipt/v1",
+        "schema": "cap.receipt/v2",
         "tool": "cap",
         "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "requested_targets": list(targets or []),
+        "scanned_from": str(Path.cwd()),
         "verdict": overall_verdict(reports),
         "skipped": list(skipped or []),
+        "notes": "entries only cover files matched by the audit walk; unknown-type siblings are not enumerated",
         "files": [
             {
                 "path": report.path,
@@ -857,23 +947,47 @@ def _load_receipt_key(key_path: Path) -> bytes:
 
 
 def write_receipt_file(
-    out_path: Path, key_path: Path, reports: list[FileReport], skipped: Optional[list[str]] = None
+    out_path: Path,
+    key_path: Path,
+    reports: list[FileReport],
+    skipped: Optional[list[str]] = None,
+    targets: Optional[list[str]] = None,
+    auto_create_key: bool = False,
 ) -> None:
-    import os
-    import tempfile
+    """Write a signed receipt. With auto_create_key, a missing key file is
+    generated (32 random bytes, 0600) so first-use does not fail; verification
+    never invents keys."""
+    import secrets
 
-    receipt = make_receipt(reports, skipped)
+    if not key_path.exists() and auto_create_key:
+        key_path.parent.mkdir(parents=True, exist_ok=True)
+        key_path.write_text(secrets.token_hex(32) + "\n", encoding="utf-8")
+        os.chmod(key_path, 0o600)
+
+    receipt = make_receipt(reports, skipped, targets=targets)
     receipt["hmac_sha256"] = sign_receipt(receipt, _load_receipt_key(key_path))
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    handle = tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=out_path.parent, delete=False)
-    temp_path = Path(handle.name)
-    try:
-        with handle:
-            handle.write(json.dumps(receipt, indent=2, ensure_ascii=True, sort_keys=True) + "\n")
-        os.replace(temp_path, out_path)
-    finally:
-        if temp_path.exists():
-            temp_path.unlink()
+    payload = json.dumps(receipt, indent=2, ensure_ascii=True, sort_keys=True) + "\n"
+    # Windows: concurrent verifiers hold the destination open without
+    # FILE_SHARE_DELETE; retry briefly instead of failing the write.
+    last_error: OSError | None = None
+    for _attempt in range(5):
+        handle = tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=out_path.parent, delete=False)
+        temp_path = Path(handle.name)
+        try:
+            with handle:
+                handle.write(payload)
+            os.replace(temp_path, out_path)
+            last_error = None
+            break
+        except OSError as error:
+            last_error = error
+            time.sleep(0.2 * (_attempt + 1))
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
+    if last_error is not None:
+        raise last_error
 
 
 def verify_receipt_file(receipt_path: Path, key_path: Path) -> tuple[bool, str]:
@@ -888,12 +1002,17 @@ def verify_receipt_file(receipt_path: Path, key_path: Path) -> tuple[bool, str]:
     for required in ("schema", "verdict", "files", "hmac_sha256"):
         if required not in receipt:
             return False, f"invalid receipt: missing field {required!r}"
-    if receipt["schema"] != "cap.receipt/v1":
+    if receipt["schema"] not in ("cap.receipt/v1", "cap.receipt/v2"):
         return False, f"invalid receipt: unsupported schema {receipt['schema']!r}"
     expected = sign_receipt(receipt, _load_receipt_key(key_path))
     provided = str(receipt.get("hmac_sha256", ""))
     if not hmac_module.compare_digest(expected, provided):
         return False, "TAMPERED: HMAC mismatch (content or key differs)"
+    if receipt["schema"] == "cap.receipt/v1":
+        return (
+            True,
+            "VALID signature only (legacy v1 receipt: no target binding, contents not checked)",
+        )
     counts = ", ".join(
         f"{v} {k}" for k, v in sorted(
             (("clean", sum(1 for f in receipt["files"] if f["verdict"] == "clean")),
@@ -902,6 +1021,46 @@ def verify_receipt_file(receipt_path: Path, key_path: Path) -> tuple[bool, str]:
         ) if v
     )
     return True, f"VALID receipt ({counts or 'no files'}) verdict={receipt['verdict']}"
+
+
+def verify_files_against_receipt(
+    receipt_path: Path, base_dir: Optional[Path] = None
+) -> tuple[bool, str]:
+    """Recompute sha256 of every file listed in a signed receipt.
+
+    A valid HMAC alone proves the report was not altered -- NOT that the files
+    on disk still match what was scanned. This closes that gap.
+    """
+    import hashlib
+
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        return False, f"invalid receipt: unreadable ({error})"
+    base = base_dir or receipt_path.parent
+    mismatches: list[str] = []
+    missing: list[str] = []
+    checked = 0
+    for entry in receipt.get("files", []) or []:
+        path_str = str(entry.get("path", ""))
+        if not path_str or path_str.startswith("<"):
+            continue
+        candidate = Path(path_str)
+        if not candidate.is_absolute():
+            candidate = base / candidate
+        if not candidate.is_file() or candidate.is_symlink():
+            missing.append(path_str)
+            continue
+        digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
+        checked += 1
+        if digest != entry.get("sha256"):
+            mismatches.append(path_str)
+    problems = [f"content changed: {p}" for p in mismatches] + [f"missing: {p}" for p in missing]
+    if problems:
+        shown = "; ".join(problems[:5])
+        extra = f" (+{len(problems) - 5} more)" if len(problems) > 5 else ""
+        return False, f"STALE OR TAMPERED: {shown}{extra}"
+    return True, f"contents verified ({checked} files match the signed hashes)"
 
 
 def overall_verdict(reports: list[FileReport]) -> str:
@@ -979,20 +1138,50 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Second-pass review of audited files by a configured LLM (CAP_LLM_ENDPOINT/MODEL/API_KEY); off unless set",
     )
     parser.add_argument("--receipt-out", type=Path, help="Write an HMAC-signed receipt to this path")
-    parser.add_argument("--receipt-key", type=Path, help="Key file for receipt signing/verification")
+    parser.add_argument(
+        "--receipt-key", type=Path, help="Key file (signing generates it if missing; verification requires it)"
+    )
     parser.add_argument("--verify-receipt", type=Path, help="Verify a signed receipt and exit 0/1")
+    parser.add_argument(
+        "--verify-files",
+        action="store_true",
+        help="With --verify-receipt: also recompute hashes of every listed file against disk",
+    )
     return parser
 
 
+def _fail_closed_exit(reports: list[FileReport], base_exit: int) -> int:
+    """A requested network gate that could not run must never look like a pass."""
+    degraded = any(
+        finding.rule_id in {"dep_check_unavailable", "llm_review_error"}
+        for report in reports
+        for finding in report.findings
+    )
+    return max(base_exit, 1) if degraded else base_exit
+
+
 def main(argv: Optional[list[str]] = None) -> int:
+    if sys.stdout is not None and hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(errors="replace")
+            sys.stderr.reconfigure(errors="replace")
+        except (OSError, ValueError):
+            pass
     args = build_arg_parser().parse_args(argv)
+    # Verification short-circuits before any scan work.
     if args.verify_receipt:
         if not args.receipt_key:
             print("status: error\nsummary: --verify-receipt requires --receipt-key", file=sys.stderr)
             return 1
         ok, message = verify_receipt_file(args.verify_receipt, args.receipt_key)
         print(message)
-        return 0 if ok else 1
+        if not ok:
+            return 1
+        if args.verify_files:
+            files_ok, files_message = verify_files_against_receipt(args.verify_receipt)
+            print(files_message)
+            return 0 if files_ok else 1
+        return 0
     targets = args.targets or [Path(".")]
     reports, skipped = run_audit_flow(
         targets, recursive=args.recursive, check_deps=args.check_deps, llm_scan=args.llm_scan
@@ -1003,7 +1192,14 @@ def main(argv: Optional[list[str]] = None) -> int:
             print("status: error\nsummary: --receipt-out requires --receipt-key", file=sys.stderr)
             return 1
         try:
-            write_receipt_file(args.receipt_out, args.receipt_key, reports, skipped)
+            write_receipt_file(
+                args.receipt_out,
+                args.receipt_key,
+                reports,
+                skipped,
+                targets=[str(t) for t in targets],
+                auto_create_key=True,
+            )
         except RuntimeError as error:
             print(f"status: error\nsummary: {error}", file=sys.stderr)
             return 1
@@ -1011,8 +1207,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         if skipped and not reports:
             return 2  # nothing audited at all: hostile-grade CI failure
         if skipped:
-            return 1  # partially skipped: suspect-grade, per README strict contract
-        return STRICT_EXIT_CODES[overall_verdict(reports)]
+            return _fail_closed_exit(reports, 1)
+        code = STRICT_EXIT_CODES[overall_verdict(reports)]
+        return _fail_closed_exit(reports, code)
     return 0
 
 
@@ -1043,10 +1240,13 @@ def main_hook(argv: Optional[list[str]] = None) -> int:
     if isinstance(parsed, dict):
         tool_name = str(parsed.get("tool_name") or "<stdin>")
         body = f"tool_name: {tool_name}\n" + json.dumps(
-            parsed.get("tool_input", parsed), indent=1, ensure_ascii=True
+            # ensure_ascii=False keeps invisible unicode visible to the scanner
+            parsed.get("tool_input", parsed), indent=1, ensure_ascii=False
         )
 
-    report = audit_bytes(Path(f"<hook:{tool_name}>"), body.encode("utf-8"))
+    # Hook payloads are always untrusted: suppression markers stay inert even
+    # when the harness happens to run from cap's own checkout.
+    report = audit_bytes(Path(f"<hook:{tool_name}>"), body.encode("utf-8"), allow_suppression=False)
     if args.json:
         print(
             json.dumps(
@@ -1070,4 +1270,6 @@ def main_hook(argv: Optional[list[str]] = None) -> int:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "hook":
+        raise SystemExit(main_hook(sys.argv[2:]))
     raise SystemExit(main())

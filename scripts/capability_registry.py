@@ -72,6 +72,41 @@ def configured_skill_roots(config: RouterConfig) -> list[tuple[str, Path, str]]:
         ),
     ]
 
+def _bootstrap_seed_snapshots(config) -> None:
+    """Copy checked-in seed snapshots into the machine-local state dir once.
+
+    The repo ships placeholder snapshots so a fresh clone can build an index
+    before the first `cap snapshot-runtimes`; runtime writes always target the
+    state dir, never the clone.
+    """
+    import shutil as _shutil
+
+    seed_root = Path(__file__).resolve().parents[1] / "data" / "snapshots"
+    if not seed_root.is_dir() or config.snapshot_dir.resolve(strict=False) == seed_root.resolve(strict=False):
+        return
+    config.snapshot_dir.mkdir(parents=True, exist_ok=True)
+    pairs = [
+        (TOOL_SNAPSHOT, seed_root / "codex-tools.json"),
+        (CLAUDE_MCP_SNAPSHOT, seed_root / "claude-mcps.json"),
+        (CODEX_MCP_SNAPSHOT, seed_root / "codex-mcps.json"),
+        (PLUGIN_SNAPSHOT, seed_root / "runtime-plugins.json"),
+        (HERMES_TOOL_SNAPSHOT, seed_root / "hermes-tools.json"),
+    ]
+    for target, seed in pairs:
+        if not target.exists() and seed.is_file():
+            _shutil.copyfile(seed, target)
+    if not PROJECT_CATALOG.exists():
+        seed_catalog = seed_root.parent / "CAPABILITIES-DETAIL.md"
+        if seed_catalog.is_file():
+            PROJECT_CATALOG.parent.mkdir(parents=True, exist_ok=True)
+            _shutil.copyfile(seed_catalog, PROJECT_CATALOG)
+    csv_path = getattr(config, "skill_catalog_csv", None)
+    seed_csv = seed_root.parent / "SKILL-CATALOG.csv"
+    if csv_path is not None and not csv_path.exists() and seed_csv.is_file():
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        _shutil.copyfile(seed_csv, csv_path)
+
+
 
 def configure_router(config: RouterConfig, *, verified_startup: bool = False) -> None:
     """Apply the resolved structural configuration to the legacy module globals."""
@@ -119,6 +154,7 @@ def configure_router(config: RouterConfig, *, verified_startup: bool = False) ->
         HERMES_SHARED_SURFACE = tuple(parsed_surface)
     HERMES_SHARED_SURFACE_ROOT = config.hermes_shared_surface_root
     PROJECT_CATALOG = config.catalog_path
+    _bootstrap_seed_snapshots(config)
     SKILL_ROOTS = configured_skill_roots(config)
     if verified_startup:
         STARTUP_CONFIG_ERROR = None
@@ -4674,7 +4710,11 @@ def export_skill_csv(output: Path, destination: Path) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = RegistryArgumentParser(prog="capability-registry", description=DESCRIPTION)
+    parser = RegistryArgumentParser(
+        prog="capability-registry",
+        description=DESCRIPTION,
+        epilog="config-independent commands: 'cap audit', 'cap hook', 'cap init', 'cap doctor'",
+    )
     parser.add_argument("--output", type=Path, default=ROUTER_CONFIG.output_dir, help="Registry output directory")
     parser.add_argument(
         "--project",
@@ -4757,8 +4797,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Second-pass LLM review (needs CAP_LLM_ENDPOINT/MODEL/API_KEY)",
     )
     audit_parser.add_argument("--receipt-out", type=Path)
-    audit_parser.add_argument("--receipt-key", type=Path)
+    audit_parser.add_argument(
+        "--receipt-key", type=Path, help="Key file (signing generates it if missing)"
+    )
     audit_parser.add_argument("--verify-receipt", type=Path)
+    audit_parser.add_argument(
+        "--verify-files", action="store_true", help="With --verify-receipt: recheck file hashes on disk"
+    )
 
     init_parser = subparsers.add_parser(
         "init", help="Detect installed harnesses and write machine-local bindings"
@@ -4816,29 +4861,47 @@ def _run_standalone(command: str, argv: list[str]) -> int:
             llm_scan=getattr(args, "llm_scan", False),
         )
         emit(reports, getattr(args, "json", False), skipped)
+        # Verification short-circuits before any scan work.
         if getattr(args, "verify_receipt", None):
-            from cap_audit import verify_receipt_file
+            from cap_audit import verify_files_against_receipt, verify_receipt_file
 
             if not getattr(args, "receipt_key", None):
                 print("status: error\nsummary: --verify-receipt requires --receipt-key", file=sys.stderr)
                 return 1
             ok, message = verify_receipt_file(args.verify_receipt, args.receipt_key)
             print(message)
-            return 0 if ok else 1
+            if not ok:
+                return 1
+            if getattr(args, "verify_files", False):
+                files_ok, files_message = verify_files_against_receipt(args.verify_receipt)
+                print(files_message)
+                return 0 if files_ok else 1
+            return 0
         if getattr(args, "receipt_out", None):
             from cap_audit import write_receipt_file
 
             if not getattr(args, "receipt_key", None):
                 print("status: error\nsummary: --receipt-out requires --receipt-key", file=sys.stderr)
                 return 1
-            write_receipt_file(args.receipt_out, args.receipt_key, reports, skipped)
+            write_receipt_file(
+                args.receipt_out,
+                args.receipt_key,
+                reports,
+                skipped,
+                targets=[str(t) for t in targets],
+                auto_create_key=True,
+            )
+        base_code = 0
         if getattr(args, "strict", False):
+            from cap_audit import _fail_closed_exit
+
             if skipped and not reports:
-                return 2
-            if skipped:
-                return 1
-            return STRICT_EXIT_CODES[overall_verdict(reports)]
-        return 0
+                base_code = 2
+            elif skipped:
+                base_code = _fail_closed_exit(reports, 1)
+            else:
+                base_code = _fail_closed_exit(reports, STRICT_EXIT_CODES[overall_verdict(reports)])
+        return base_code
 
     if command == "hook":
         from cap_audit import main_hook
