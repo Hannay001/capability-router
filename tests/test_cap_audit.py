@@ -238,3 +238,63 @@ class HookModeTest(unittest.TestCase):
         code, out, _ = self._run_hook("just harmless notes\n", "--json")
         self.assertEqual(code, 0)
         self.assertIn('"verdict": "clean"', out)
+
+
+class DependencyGateTest(unittest.TestCase):
+    def test_parse_requirements_pinned_only(self) -> None:
+        text = "requests==2.19.0\nflask>=2.0  # unpinned ops skipped\n# comment\n-r other.txt\nDjango==4.0\n"
+        deps = cap_audit.parse_dependency_manifests(text, "requirements.txt")
+        self.assertEqual(deps, [("PyPI", "requests", "2.19.0"), ("PyPI", "Django", "4.0")])
+
+    def test_parse_package_json(self) -> None:
+        text = json.dumps({"dependencies": {"lodash": "4.17.20"}, "devDependencies": {"left-pad": "1.3.0"}})
+        deps = cap_audit.parse_dependency_manifests(text, "package.json")
+        self.assertIn(("npm", "lodash", "4.17.20"), deps)
+        self.assertIn(("npm", "left-pad", "1.3.0"), deps)
+
+    def test_osv_batch_maps_vulns_by_dep(self) -> None:
+        from unittest import mock
+        import io as _io
+
+        response = _io.BytesIO(
+            json.dumps({"results": [{}, {"vulns": [{"id": "GHSA-xxxx"}]}]}).encode()
+        )
+        fake_ctx = mock.MagicMock(); fake_ctx.__enter__.return_value = response
+        with mock.patch.object(cap_audit.urllib.request, "urlopen", return_value=fake_ctx):
+            found = cap_audit.query_osv_batch([("PyPI", "clean", "1.0"), ("PyPI", "broken", "0.1")])
+        self.assertEqual(found, {("PyPI", "broken", "0.1"): ["GHSA-xxxx"]})
+
+    def test_dependency_findings_degrade_offline(self) -> None:
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "requirements.txt").write_text("requests==2.19.0\n", encoding="utf-8")
+            with mock.patch.object(
+                cap_audit,
+                "query_osv_batch",
+                side_effect=OSError("network unreachable"),
+            ):
+                findings, checked = cap_audit.dependency_findings(root)
+            self.assertEqual(len(checked), 1)
+            rules = {finding.rule_id for finding in findings}
+            self.assertEqual(rules, {"dep_check_unavailable"})
+
+    def test_vulnerable_dep_floors_verdict_to_suspect(self) -> None:
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "requirements.txt").write_text("requests==2.19.0\n", encoding="utf-8")
+            with mock.patch.object(
+                cap_audit,
+                "query_osv_batch",
+                return_value={("PyPI", "requests", "2.19.0"): ["CVE-2023-32681"]},
+            ):
+                reports, skipped = cap_audit.run_audit_flow([root], check_deps=True)
+            dep_reports = [r for r in reports if r.path.startswith("<deps:")]
+            self.assertEqual(skipped, [])
+            self.assertEqual(dep_reports[0].verdict, "suspect")
+            self.assertEqual(dep_reports[0].findings[0].rule_id, "vulnerable_dependency")
+
+

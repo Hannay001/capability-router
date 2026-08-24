@@ -4746,6 +4746,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Exit non-zero when the overall verdict is suspect (1) or hostile (2)",
     )
+    audit_parser.add_argument(
+        "--check-deps",
+        action="store_true",
+        help="Also check pinned requirements.txt/package.json deps against osv.dev (network; degrades offline)",
+    )
 
     init_parser = subparsers.add_parser(
         "init", help="Detect installed harnesses and write machine-local bindings"
@@ -4792,11 +4797,15 @@ def _run_standalone(command: str, argv: list[str]) -> int:
             continue
         stripped.append(token)
     if command == "audit":
-        from cap_audit import STRICT_EXIT_CODES, audit_targets, emit, overall_verdict
+        from cap_audit import STRICT_EXIT_CODES, emit, overall_verdict, run_audit_flow
 
         args = build_parser().parse_args([*stripped])
         targets = getattr(args, "targets", []) or [Path(".")]
-        reports, skipped = audit_targets(targets, recursive=getattr(args, "recursive", False))
+        reports, skipped = run_audit_flow(
+            targets,
+            recursive=getattr(args, "recursive", False),
+            check_deps=getattr(args, "check_deps", False),
+        )
         emit(reports, getattr(args, "json", False), skipped)
         if getattr(args, "strict", False):
             if skipped and not reports:

@@ -63,7 +63,7 @@ local, dependency-free install-time firewall -- that gap is cap's niche.
       files to runtime traffic.
 - [ ] Optional LLM deep-scan tier behind a provider plug-in interface
       (offline regex remains the default; see v1.1 below).
-- [ ] Dependency CVE gate: check skill-declared dependencies against
+- [x] Dependency CVE gate: check skill-declared dependencies against
       osv.dev (keyless, cached) during `cap audit`.
 - [ ] Signed audit receipts: locally-verifiable scan reports for CI evidence.
 - [ ] Reranking study: body-aware second-stage ranking (metadata-only

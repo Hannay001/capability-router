@@ -125,6 +125,11 @@ Executable payloads (`.pyc`, `.so`, `.dll`, `.wasm`, ...) inside an audited
 directory are not text-scannable, so they are hashed and floored to at least
 `suspect` -- a capability folder that ships bytecode never audits clean.
 
+With `--check-deps`, pinned `requirements.txt` / `package.json` dependencies
+are checked against the keyless osv.dev API; known-vulnerable pins are
+reported as high findings (taxonomy T08). The check degrades gracefully to an
+informational note when offline, so CI gates never fail on network flake.
+
 ### Watching live tool calls (`cap hook`)
 
 Beyond static files, the firewall can watch runtime traffic. Register it as

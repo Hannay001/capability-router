@@ -19,6 +19,7 @@ import argparse
 import json
 import re
 import unicodedata
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Optional
@@ -37,11 +38,13 @@ BINARY_PAYLOAD_SUFFIXES = {
 # Indicative mapping from cap rules to Tencent SkillTrustBench categories
 # (T01 instruction hijacking, T02 memory poisoning, T03 remote payload /
 # network egress, T04 embedded malicious code, T05 privilege & access abuse,
-# T09 insecure practices). Meta-findings carry an empty taxonomy.
+# T08 insecure dependencies, T09 insecure practices). Meta-findings carry an
+# empty taxonomy.
 RULE_TAXONOMY: dict[str, str] = {
     "instruction_override": "T01",
     "hidden_directive_text": "T01/T02",
     "unclosed_comment_directive": "T01/T02",
+    "vulnerable_dependency": "T08",
     "invisible_unicode": "T01",
     "homoglyph_mixing": "T01",
     "exfiltration_pipeline": "T03",
@@ -544,6 +547,150 @@ def audit_targets(
     return reports, skipped
 
 
+# --- Optional dependency CVE gate (opt-in via --check-deps; network used
+# only for the keyless osv.dev batch API, failures degrade to info). ---
+
+_REQUIREMENT_RE = re.compile(
+    r"^(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*==\s*(?P<ver>[A-Za-z0-9][A-Za-z0-9._!*+~-]*)"
+)
+_NPM_VERSION_RE = re.compile(r"\"(?P<name>@?[A-Za-z0-9][A-Za-z0-9._/-]*)\"\s*:\s*\"(?P<ver>\d[0-9A-Za-z.+~^-]*)\"")
+
+
+def parse_dependency_manifests(text: str, filename: str) -> list[tuple[str, str, str]]:
+    """Extract (ecosystem, name, version) triples from requirements.txt / package.json."""
+    deps: list[tuple[str, str, str]] = []
+    if filename == "requirements.txt":
+        for raw in text.split("\n"):
+            line = raw.split("#", 1)[0].strip()
+            if not line or line.startswith("-"):
+                continue  # comments and -r/--hash directives
+            match = _REQUIREMENT_RE.match(line)
+            if match:
+                deps.append(("PyPI", match.group("name"), match.group("ver").rstrip(".*")))
+    elif filename == "package.json":
+        try:
+            data = json.loads(text)
+        except ValueError:
+            return deps
+        if isinstance(data, dict):
+            for section in ("dependencies", "devDependencies"):
+                entries = data.get(section)
+                if not isinstance(entries, dict):
+                    continue
+                for name, spec in entries.items():
+                    match = _NPM_VERSION_RE.search(f'"{name}": "{spec}"')
+                    if match:
+                        deps.append(("npm", name, match.group("ver")))
+    return deps
+
+
+def query_osv_batch(deps: list[tuple[str, str, str]]) -> dict[tuple[str, str, str], list[str]]:
+    """Query osv.dev for known vulns; returns map dep -> [GHSA/CVE ids].
+
+    Raises OSError/urllib errors on network failure -- callers degrade.
+    """
+    if not deps:
+        return {}
+    payload = json.dumps(
+        {"queries": [{"package": {"ecosystem": eco, "name": name}, "version": ver} for eco, name, ver in deps]}
+    ).encode("utf-8")
+    request = urllib.request.Request(  # noqa: S310 - fixed https endpoint, no user input in URL
+        "https://api.osv.dev/v1/querybatch",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=15) as response:  # noqa: S310
+        results = json.loads(response.read().decode("utf-8")).get("results", [])
+    found: dict[tuple[str, str, str], list[str]] = {}
+    for dep, result in zip(deps, results, strict=False):
+        vulns = result.get("vulns") if isinstance(result, dict) else None
+        if vulns:
+            found[dep] = sorted({str(v.get("id", "?")) for v in vulns})[:5]
+    return found
+
+
+def dependency_findings(target: Path) -> tuple[list[Finding], list[str]]:
+    """Scan a directory tree for pinned dependency manifests and check them."""
+    resolved = target.expanduser()
+    if not resolved.is_dir():
+        return [], []
+    manifests: dict[str, list[tuple[str, str, str]]] = {}
+    manifest_paths: dict[str, Path] = {}
+    for candidate in sorted(resolved.rglob("*")):
+        if "__pycache__" in candidate.parts or candidate.name not in ("requirements.txt", "package.json"):
+            continue
+        if not candidate.is_file() or candidate.is_symlink():
+            continue
+        try:
+            text = candidate.read_text(encoding="utf-8", errors="ignore")[:262_144]
+        except OSError:
+            continue
+        key = f"{candidate}:{candidate.name}"
+        deps = parse_dependency_manifests(text, candidate.name)
+        if deps:
+            manifests[key] = deps
+            manifest_paths[key] = candidate
+
+    findings: list[Finding] = []
+    checked: list[str] = []
+    flat: list[tuple[str, str, str]] = []
+    owner: dict[tuple[str, str, str], str] = {}
+    for key, deps in manifests.items():
+        checked.append(key)
+        for dep in deps:
+            if dep not in owner:
+                flat.append(dep)
+                owner[dep] = key
+    if not flat:
+        return [], checked
+    try:
+        vuln_map = query_osv_batch(flat)
+    except Exception as error:  # network unavailable: degrade loudly but cleanly
+        findings.append(
+            Finding(
+                rule_id="dep_check_unavailable",
+                severity="info",
+                title=f"Dependency CVE check skipped ({type(error).__name__})",
+                line=0,
+                excerpt=str(error)[:120],
+            )
+        )
+        return findings, checked
+    for dep, vuln_ids in vuln_map.items():
+        origin = manifest_paths.get(owner[dep])
+        findings.append(
+            Finding(
+                rule_id="vulnerable_dependency",
+                severity="high",
+                title=f"{dep[1]} {dep[2]} has known vulnerabilities ({dep[0]})",
+                line=0,
+                excerpt=f"{' '.join(vuln_ids)}  ({origin})" if origin else " ".join(vuln_ids),
+            )
+        )
+    return findings, checked
+
+
+def run_audit_flow(
+    targets: Iterable[Path], *, recursive: bool = False, check_deps: bool = False
+) -> tuple[list[FileReport], list[str]]:
+    """Shared audit pipeline for the CLI and standalone dispatch."""
+    reports, skipped = audit_targets(targets, recursive=recursive)
+    if check_deps:
+        for target in targets:
+            dep_findings, _checked = dependency_findings(target)
+            if dep_findings:
+                reports.append(
+                    FileReport(
+                        path=f"<deps:{target}>",
+                        sha256="-",
+                        verdict=_verdict(dep_findings),
+                        findings=dep_findings,
+                    )
+                )
+    return reports, skipped
+
+
 def overall_verdict(reports: list[FileReport]) -> str:
     worst = "clean"
     for report in reports:
@@ -608,13 +755,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Exit 0 clean / 1 suspect or any skipped target / 2 hostile (or nothing audited)",
     )
+    parser.add_argument(
+        "--check-deps",
+        action="store_true",
+        help="Also check pinned requirements.txt/package.json deps against osv.dev (network; degrades offline)",
+    )
     return parser
 
 
 def main(argv: Optional[list[str]] = None) -> int:
     args = build_arg_parser().parse_args(argv)
     targets = args.targets or [Path(".")]
-    reports, skipped = audit_targets(targets, recursive=args.recursive)
+    reports, skipped = run_audit_flow(targets, recursive=args.recursive, check_deps=args.check_deps)
     emit(reports, args.json, skipped)
     if args.strict:
         if skipped and not reports:
