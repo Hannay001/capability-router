@@ -67,7 +67,7 @@ machine, builds the index, and reports back in plain language.
 ### Way 2 — terminal, zero manual wiring
 
 ```sh
-git clone https://github.com/<you>/capability-router.git
+git clone https://github.com/<you>/cap.git
 cd capability-router
 ./install.sh        # symlinks `cap`, then auto-detects and binds every harness on this machine
 cap snapshot-runtimes
