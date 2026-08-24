@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """System binding for cap: discover installed agent harnesses, bind, report.
 
-`cap init`  — scan the machine, write config/local.toml bindings.
-`cap doctor` — show what was found and whether routing is healthy.
+`lockkeeper init`  — scan the machine, write config/local.toml bindings.
+`lockkeeper doctor` — show what was found and whether routing is healthy.
 
 Harness detection is deliberately generic so future runtimes work without a
 cap release: anything under $HOME that looks like an agent harness (a dot-dir
@@ -173,7 +173,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     roots = selected_skill_roots(selection)
     local_path = _repo_root() / "config" / "local.toml"
     lines = [
-        "# Written by `cap init` — machine-local bindings; safe to delete.",
+        "# Written by `lockkeeper init` — machine-local bindings; safe to delete.",
         "# This file is git-ignored and never leaves this machine.",
         f"[project]\nsurface_roots = [{', '.join(_toml_str(p) for p in _surface_candidates())}]",
         "",
@@ -188,7 +188,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     for root in roots:
         print(f"  - {root}")
     print(f"bindings written: {local_path}")
-    print("next: cap rebuild && cap doctor")
+    print("next: lockkeeper rebuild && lockkeeper doctor")
     return 0
 
 
@@ -210,7 +210,7 @@ def _repo_root() -> Path:
 
 def cmd_doctor(args: argparse.Namespace) -> int:
     harnesses = detect_harnesses()
-    print("cap doctor")
+    print("lockkeeper doctor")
     print(f"python: {sys.version.split()[0]} (requires >= 3.11)")
     print("")
     print("harnesses:")
@@ -241,14 +241,14 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             pass
     else:
         print("")
-        print("registry: not built yet — run `cap snapshot-runtimes && cap rebuild`")
+        print("registry: not built yet — run `lockkeeper snapshot-runtimes && lockkeeper rebuild`")
 
     local_config = _repo_root() / "config" / "local.toml"
     print("")
     if local_config.is_file():
         print("binding: config/local.toml present (machine-local)")
     else:
-        print("binding: none yet — run `cap init` to bind detected harnesses")
+        print("binding: none yet — run `lockkeeper init` to bind detected harnesses")
     return 0
 
 

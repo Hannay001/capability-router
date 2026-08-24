@@ -271,7 +271,7 @@ def load_router_config(
             config = _apply_overlay(config, default_data, default_path)
             default_project = _default_project(default_data, default_path)
 
-    # Machine-local bindings (written by `cap init`, never committed): sits
+    # Machine-local bindings (written by `lockkeeper init`, never committed): sits
     # above defaults so a cloned repo binds to whatever this machine has.
     local_path = (root / "config" / "local.toml").resolve(strict=False)
     if include_repository and local_path.is_file():
