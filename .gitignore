@@ -1,0 +1,24 @@
+# Python and test caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Optional semantic-sidecar environments
+.venv/
+embedder/.venv/
+
+# Local machine and verification evidence
+.DS_Store
+.local/
+evidence/
+tmp/
+*.tmp
+*.log
+
+# Generated at export time; snapshots remain tracked.
+data/SKILL-CATALOG.csv
+
+# Machine-local bindings from cap init
+config/local.toml
+data/snapshots/system

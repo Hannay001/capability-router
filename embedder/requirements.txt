@@ -1,0 +1,2 @@
+fastembed==0.8.0
+numpy>=1.26,<3

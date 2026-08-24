@@ -1,0 +1,62 @@
+{
+  "project": "example",
+  "_doc": "Copy to policies/<your-project>.json and select with --project <name>. All keys are optional; unknown keys are ignored by this version.",
+  "deny": [
+    {
+      "types": [
+        "mcp",
+        "tool",
+        "toolset"
+      ],
+      "names": [
+        "some-memory-server"
+      ],
+      "_doc": "Deny is absolute: denied capabilities never enter bundles, even for required lanes."
+    }
+  ],
+  "require_context": [
+    {
+      "choose": [
+        {
+          "tool": "mcp__myproject__search_decisions"
+        },
+        {
+          "mcp": "myproject"
+        }
+      ],
+      "why": "Load prior project decisions before acting.",
+      "required": false,
+      "_doc": "Choices resolve in order, each with its own type. required=true raises when none resolve; false skips silently."
+    }
+  ],
+  "prefer": [
+    {
+      "match": "\\b(library|framework|sdk|api docs)\\b",
+      "choose": [
+        {
+          "tool": "mcp__context7__resolve-library-id"
+        }
+      ],
+      "lane": "context",
+      "why": "Prefer live library documentation.",
+      "_doc": "Regex on the task text; matching adds the chosen capability to the lane with a score boost."
+    }
+  ],
+  "enable_routes": [],
+  "_enable_routes_keys": [
+    "harness",
+    "browser",
+    "software"
+  ],
+  "_enable_routes_doc": "Opt-in built-in demo routes (they reference skills that may not exist on your machine; disabled lanes degrade silently).",
+  "output_lane": {
+    "choose": [
+      {
+        "skill": "your-output-polisher"
+      }
+    ],
+    "why": "Apply the external-facing voice pass last.",
+    "required": false,
+    "_doc": "Fires only when the task matches external-facing keywords (email, deck, publish, ...)."
+  }
+}
