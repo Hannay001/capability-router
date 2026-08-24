@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 import unicodedata
 import urllib.request
 from dataclasses import dataclass, field
@@ -691,6 +692,104 @@ def run_audit_flow(
     return reports, skipped
 
 
+# --- Signed audit receipts: locally verifiable evidence of a scan run. ---
+# HMAC-SHA256 over a canonical JSON rendering; the key never leaves the
+# operator's machine, so a receipt proves *someone with the key* produced it.
+
+
+def make_receipt(
+    reports: list[FileReport], skipped: Optional[list[str]] = None
+) -> dict:
+    from datetime import datetime, timezone
+
+    return {
+        "schema": "cap.receipt/v1",
+        "tool": "cap",
+        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "verdict": overall_verdict(reports),
+        "skipped": list(skipped or []),
+        "files": [
+            {
+                "path": report.path,
+                "sha256": report.sha256,
+                "verdict": report.verdict,
+                "findings": [finding.to_dict() for finding in report.findings],
+            }
+            for report in reports
+        ],
+    }
+
+
+def _canonical_receipt_bytes(receipt: dict) -> bytes:
+    payload = {k: v for k, v in receipt.items() if k != "hmac_sha256"}
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+
+
+def sign_receipt(receipt: dict, key: bytes) -> str:
+    import hashlib
+    import hmac
+
+    return hmac.new(key, _canonical_receipt_bytes(receipt), hashlib.sha256).hexdigest()
+
+
+def _load_receipt_key(key_path: Path) -> bytes:
+    try:
+        key = key_path.expanduser().read_bytes().strip()
+    except OSError as error:
+        raise RuntimeError(f"receipt key unreadable: {key_path}: {error}") from error
+    if not key:
+        raise RuntimeError(f"receipt key file is empty: {key_path}")
+    return key
+
+
+def write_receipt_file(
+    out_path: Path, key_path: Path, reports: list[FileReport], skipped: Optional[list[str]] = None
+) -> None:
+    import os
+    import tempfile
+
+    receipt = make_receipt(reports, skipped)
+    receipt["hmac_sha256"] = sign_receipt(receipt, _load_receipt_key(key_path))
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=out_path.parent, delete=False)
+    temp_path = Path(handle.name)
+    try:
+        with handle:
+            handle.write(json.dumps(receipt, indent=2, ensure_ascii=True, sort_keys=True) + "\n")
+        os.replace(temp_path, out_path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+
+
+def verify_receipt_file(receipt_path: Path, key_path: Path) -> tuple[bool, str]:
+    import hmac as hmac_module
+
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        return False, f"invalid receipt: unreadable ({error})"
+    if not isinstance(receipt, dict):
+        return False, "invalid receipt: root must be an object"
+    for required in ("schema", "verdict", "files", "hmac_sha256"):
+        if required not in receipt:
+            return False, f"invalid receipt: missing field {required!r}"
+    if receipt["schema"] != "cap.receipt/v1":
+        return False, f"invalid receipt: unsupported schema {receipt['schema']!r}"
+    expected = sign_receipt(receipt, _load_receipt_key(key_path))
+    provided = str(receipt.get("hmac_sha256", ""))
+    if not hmac_module.compare_digest(expected, provided):
+        return False, "TAMPERED: HMAC mismatch (content or key differs)"
+    counts = ", ".join(
+        f"{v} {k}" for k, v in sorted(
+            (("clean", sum(1 for f in receipt["files"] if f["verdict"] == "clean")),
+             ("suspect", sum(1 for f in receipt["files"] if f["verdict"] == "suspect")),
+             ("hostile", sum(1 for f in receipt["files"] if f["verdict"] == "hostile")))
+        ) if v
+    )
+    return True, f"VALID receipt ({counts or 'no files'}) verdict={receipt['verdict']}"
+
+
 def overall_verdict(reports: list[FileReport]) -> str:
     worst = "clean"
     for report in reports:
@@ -760,14 +859,33 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Also check pinned requirements.txt/package.json deps against osv.dev (network; degrades offline)",
     )
+    parser.add_argument("--receipt-out", type=Path, help="Write an HMAC-signed receipt to this path")
+    parser.add_argument("--receipt-key", type=Path, help="Key file for receipt signing/verification")
+    parser.add_argument("--verify-receipt", type=Path, help="Verify a signed receipt and exit 0/1")
     return parser
 
 
 def main(argv: Optional[list[str]] = None) -> int:
     args = build_arg_parser().parse_args(argv)
+    if args.verify_receipt:
+        if not args.receipt_key:
+            print("status: error\nsummary: --verify-receipt requires --receipt-key", file=sys.stderr)
+            return 1
+        ok, message = verify_receipt_file(args.verify_receipt, args.receipt_key)
+        print(message)
+        return 0 if ok else 1
     targets = args.targets or [Path(".")]
     reports, skipped = run_audit_flow(targets, recursive=args.recursive, check_deps=args.check_deps)
     emit(reports, args.json, skipped)
+    if args.receipt_out:
+        if not args.receipt_key:
+            print("status: error\nsummary: --receipt-out requires --receipt-key", file=sys.stderr)
+            return 1
+        try:
+            write_receipt_file(args.receipt_out, args.receipt_key, reports, skipped)
+        except RuntimeError as error:
+            print(f"status: error\nsummary: {error}", file=sys.stderr)
+            return 1
     if args.strict:
         if skipped and not reports:
             return 2  # nothing audited at all: hostile-grade CI failure

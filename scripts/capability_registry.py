@@ -4751,6 +4751,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Also check pinned requirements.txt/package.json deps against osv.dev (network; degrades offline)",
     )
+    audit_parser.add_argument("--receipt-out", type=Path)
+    audit_parser.add_argument("--receipt-key", type=Path)
+    audit_parser.add_argument("--verify-receipt", type=Path)
 
     init_parser = subparsers.add_parser(
         "init", help="Detect installed harnesses and write machine-local bindings"
@@ -4807,6 +4810,22 @@ def _run_standalone(command: str, argv: list[str]) -> int:
             check_deps=getattr(args, "check_deps", False),
         )
         emit(reports, getattr(args, "json", False), skipped)
+        if getattr(args, "verify_receipt", None):
+            from cap_audit import verify_receipt_file
+
+            if not getattr(args, "receipt_key", None):
+                print("status: error\nsummary: --verify-receipt requires --receipt-key", file=sys.stderr)
+                return 1
+            ok, message = verify_receipt_file(args.verify_receipt, args.receipt_key)
+            print(message)
+            return 0 if ok else 1
+        if getattr(args, "receipt_out", None):
+            from cap_audit import write_receipt_file
+
+            if not getattr(args, "receipt_key", None):
+                print("status: error\nsummary: --receipt-out requires --receipt-key", file=sys.stderr)
+                return 1
+            write_receipt_file(args.receipt_out, args.receipt_key, reports, skipped)
         if getattr(args, "strict", False):
             if skipped and not reports:
                 return 2

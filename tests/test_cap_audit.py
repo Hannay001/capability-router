@@ -259,7 +259,8 @@ class DependencyGateTest(unittest.TestCase):
         response = _io.BytesIO(
             json.dumps({"results": [{}, {"vulns": [{"id": "GHSA-xxxx"}]}]}).encode()
         )
-        fake_ctx = mock.MagicMock(); fake_ctx.__enter__.return_value = response
+        fake_ctx = mock.MagicMock()
+        fake_ctx.__enter__.return_value = response
         with mock.patch.object(cap_audit.urllib.request, "urlopen", return_value=fake_ctx):
             found = cap_audit.query_osv_batch([("PyPI", "clean", "1.0"), ("PyPI", "broken", "0.1")])
         self.assertEqual(found, {("PyPI", "broken", "0.1"): ["GHSA-xxxx"]})
@@ -297,4 +298,68 @@ class DependencyGateTest(unittest.TestCase):
             self.assertEqual(dep_reports[0].verdict, "suspect")
             self.assertEqual(dep_reports[0].findings[0].rule_id, "vulnerable_dependency")
 
+
+class ReceiptTest(unittest.TestCase):
+    def _setup(self, temp: Path) -> tuple[Path, Path, Path]:
+        root = temp / "skill"
+        root.mkdir()
+        (root / "good.md").write_text("# fine\n", encoding="utf-8")
+        key = temp / "key.hex"
+        key.write_text("a1b2c3d4e5f60718293a4b5c6d7e8f90\n", encoding="utf-8")
+        out = temp / "receipt.json"
+        return root, key, out
+
+    def test_sign_then_verify_roundtrip(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root, key, out = self._setup(Path(temp))
+            reports, skipped = cap_audit.run_audit_flow([root], recursive=True)
+            cap_audit.write_receipt_file(out, key, reports, skipped)
+            ok, message = cap_audit.verify_receipt_file(out, key)
+            self.assertTrue(ok, message)
+            self.assertIn("VALID", message)
+
+    def test_tampered_content_fails_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root, key, out = self._setup(Path(temp))
+            reports, _ = cap_audit.run_audit_flow([root], recursive=True)
+            cap_audit.write_receipt_file(out, key, reports)
+            data = json.loads(out.read_text())
+            data["verdict"] = "clean" if data["verdict"] != "clean" else "suspect"
+            out.write_text(json.dumps(data))
+            ok, message = cap_audit.verify_receipt_file(out, key)
+            self.assertFalse(ok)
+            self.assertIn("TAMPERED", message)
+
+    def test_wrong_key_fails(self) -> None:
+        import secrets
+
+        with tempfile.TemporaryDirectory() as temp:
+            root, key, out = self._setup(Path(temp))
+            reports, _ = cap_audit.run_audit_flow([root], recursive=True)
+            cap_audit.write_receipt_file(out, key, reports)
+            other = Path(temp) / "other.hex"
+            other.write_text(secrets.token_hex(16), encoding="utf-8")
+            ok, message = cap_audit.verify_receipt_file(out, other)
+            self.assertFalse(ok)
+
+    def test_missing_field_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            _, key, out = self._setup(Path(temp))
+            out.write_text(json.dumps({"schema": "cap.receipt/v1"}))
+            ok, message = cap_audit.verify_receipt_file(out, key)
+            self.assertFalse(ok)
+            self.assertIn("missing field", message)
+
+    def test_cli_verify_exit_codes(self) -> None:
+        import contextlib
+        import io
+
+        with tempfile.TemporaryDirectory() as temp:
+            root, key, out = self._setup(Path(temp))
+            code = cap_audit.main(["--receipt-out", str(out), "--receipt-key", str(key), str(root)])
+            self.assertEqual(code, 0)
+            err = io.StringIO()
+            with contextlib.redirect_stdout(err):
+                bad = cap_audit.main(["--verify-receipt", str(out), "--receipt-key", str(key)])
+            self.assertEqual(bad, 0)
 

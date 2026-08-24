@@ -130,6 +130,12 @@ are checked against the keyless osv.dev API; known-vulnerable pins are
 reported as high findings (taxonomy T08). The check degrades gracefully to an
 informational note when offline, so CI gates never fail on network flake.
 
+Every scan can produce **verifiable evidence**: `--receipt-out cap.json
+--receipt-key key.hex` writes an HMAC-SHA256-signed receipt of the full
+report. Anyone holding the key can later confirm nothing was altered with
+`cap audit --verify-receipt cap.json --receipt-key key.hex` (exit 0 valid /
+1 tampered). Useful as CI artifacts and audit trails.
+
 ### Watching live tool calls (`cap hook`)
 
 Beyond static files, the firewall can watch runtime traffic. Register it as
