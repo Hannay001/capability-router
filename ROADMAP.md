@@ -1,6 +1,6 @@
-# cap — Roadmap
+# lockkeeper — Roadmap
 
-`cap` turns the capability router from a personal inventory tool into the
+`lockkeeper` turns the capability router from a personal inventory tool into the
 **package manager and trust layer for agent capabilities**: skills, MCP
 servers, plugins, tools, agents, and commands across every major coding-agent
 runtime (Claude Code, Codex, Cursor, OpenCode, Hermes, Jcode).
@@ -18,7 +18,7 @@ prompt-injection firewall.*
 ## v1.0 — Public foundation (current work)
 
 - [x] De-personalized core: no hardcoded users, projects, or pinned paths.
-- [x] `cap` CLI name (`capability-registry` kept as an alias).
+- [x] `lockkeeper` CLI name (`capability-registry` kept as an alias).
 - [x] Project policy is config-driven (any `config/<name>.toml`).
 - [x] Bundle lane heuristics read optional declarative **policy packs**
       (`policies/<project>.json`) instead of hardcoded capability names.
@@ -33,7 +33,7 @@ prompt-injection firewall.*
 - [ ] Native Windows story: symlink privilege docs vs junction fallback,
       sys.platform-guarded integration tests, windows-latest CI job.
 
-## v1.1 — Audit firewall (`cap audit`) — SHIPPED
+## v1.1 — Audit firewall (`lockkeeper audit`) — SHIPPED
 
 Static, stdlib-only analysis of any skill/plugin/MCP definition:
 
@@ -51,19 +51,19 @@ taxonomy, SkillTrustBench), Cisco `mcp-scanner` (YARA+LLM engines, CVE +
 binary scanning), `pipelock` (egress firewall, signed action receipts),
 `parry-guard` (ML runtime-hook scanner), `SkillRouter` (body-aware retrieve-
 and-rerank at ~80K skills). None combines cross-runtime routing with a
-local, dependency-free install-time firewall -- that gap is cap's niche.
+local, dependency-free install-time firewall -- that gap is lockkeeper's niche.
 
-- [x] Taxonomy mapping: tag `cap audit` findings with T01-T09 categories so
+- [x] Taxonomy mapping: tag `lockkeeper audit` findings with T01-T09 categories so
       results are comparable with SkillTrustBench-class tools.
 - [x] Non-text payloads: `.pyc`/binaries inside an audited directory get
       hashed and floored to `suspect` instead of being ignored silently.
-- [x] `cap hook`: Claude Code / Codex hook mode scanning live tool payloads
+- [x] `lockkeeper hook`: Claude Code / Codex hook mode scanning live tool payloads
       (PreToolUse-style stdin/stdout contract), extending the firewall from
       files to runtime traffic.
 - [x] Optional LLM deep-scan tier: `--llm-scan` with an OpenAI-compatible
       provider via env config; off by default, failures degrade to info.
 - [x] Dependency CVE gate: check skill-declared dependencies against
-      osv.dev (keyless, cached) during `cap audit`.
+      osv.dev (keyless, cached) during `lockkeeper audit`.
 - [x] Signed audit receipts: locally-verifiable scan reports for CI evidence.
 - [x] Reranking study: body-aware second-stage ranking -- tested as a
       post-hoc rescore over live registries (14 known-answer queries,
@@ -71,7 +71,7 @@ local, dependency-free install-time firewall -- that gap is cap's niche.
       level ranking is already saturated at personal-registry scale;
       revisit only above ~50K overlapping skills or with a learned encoder.
 
-## v1.2 — Install & lock (`cap install`, `cap.lock`)
+## v1.2 — Install & lock (`lockkeeper install`, `cap.lock`)
 
 - Sources: git URL, tarball, local path.
 - Pipeline: fetch → audit gate → verify hash → place into selected runtime
@@ -81,7 +81,7 @@ local, dependency-free install-time firewall -- that gap is cap's niche.
 
 ## v1.3 — Remote discovery
 
-- `cap search <query> --remote`: GitHub API aggregator over topic-indexed skill
+- `lockkeeper search <query> --remote`: GitHub API aggregator over topic-indexed skill
   repos (no central server to operate).
 - Audit-on-search: remote results show cached/static verdicts before install.
 

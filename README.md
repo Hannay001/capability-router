@@ -1,25 +1,22 @@
-# cap
+# Lockkeeper 🔒
 
-[![tests](https://github.com/Hannay001/cap/actions/workflows/tests.yml/badge.svg)](https://github.com/Hannay001/cap/actions/workflows/tests.yml)
+[![tests](https://github.com/Hannay001/lockkeeper/actions/workflows/tests.yml/badge.svg)](https://github.com/Hannay001/lockkeeper/actions/workflows/tests.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey.svg)](#development)
 
+**The capability router and prompt-injection firewall for AI coding agents.**
 
-**The package manager and trust layer for your AI agent's capabilities.**
+Lockkeeper indexes every skill, MCP server, plugin, tool, agent, and command installed across your coding agents (Claude Code, Codex, Cursor, Jcode, Hermes, OpenCode, Gemini, Copilot, Windsurf, Cline). It routes any task to a bounded portfolio of the right capabilities and screens everything that crosses your agent's boundary with a built-in injection firewall.
 
-`cap` indexes every skill, MCP server, plugin, tool, agent, and command installed
-across your coding agents (Claude Code, Codex, Cursor, OpenCode, Hermes, Jcode),
-routes any task to a **bounded portfolio** of the right capabilities, and audits
-everything it touches with a built-in **prompt-injection firewall**.
+> Your agent doesn't need all your installed capabilities in context.
+> It needs the right 8, verified safe, for *this* task.
 
-> Your agent doesn't need your installed capabilities in context.
-> It needs the right 8, verified safe, for this task.
-
-```bash
-$ cap route --runtime claude --stdin <<'TASK'
+```console
+$ lockkeeper route --runtime claude --stdin <<'TASK'
 migrate the auth module to the new token API
 TASK
-```
 
-```
 status: success
 summary: selected 6 complementary capabilities across 4 lanes
 [context] mcp: context7
@@ -30,169 +27,144 @@ summary: selected 6 complementary capabilities across 4 lanes
 [support] skill: python-patterns
 ```
 
-(Exact entries depend on what you have installed; lanes and bounded portfolio
-size are what `cap` guarantees.)
+Exact entries depend on what you have installed. What `lockkeeper` guarantees is the structure: complementary lanes, a hard cap on portfolio size, and every entry filtered to what that runtime can actually execute.
 
-- Zero dependencies: pure Python 3.11+ standard library. The optional semantic
-  sidecar is the only extra.
-- Cross-runtime: one index over every harness you use; bundles are filtered to
-  what each runtime can actually execute.
-- Self-healing: queries refresh stale registries automatically; invalid config
-  fails loudly instead of guessing.
+## How it works
+
+```mermaid
+flowchart LR
+    T["Task"] --> Q["Query builder<br/>(runtime perspective)"]
+    Q --> S["Lexical scoring<br/>over one shared index"]
+    S --> O["Semantic re-rank<br/>(optional sidecar)"]
+    O --> P["Policy pack<br/>deny lists + required lanes"]
+    P --> B["Bounded portfolio<br/>max N entries"]
+    B --> F["Runtime filter<br/>executable here only"]
+    F --> R["Routed bundle"]
+```
+
+One index spans every harness on your machine. Queries refresh stale registries automatically, invalid config fails loudly instead of guessing, and each runtime receives only capabilities it can genuinely execute.
 
 ## Why
 
-Agent capability directories are exploding. Three MCP servers can eat 140k
-tokens before real work starts; copied skills ship hidden instructions nobody
-reads. Existing tools manage *servers*; none route *tasks* across *all* your
-installed capabilities, and none screen what you install.
+Agent capability directories are exploding:
 
-`cap` is the missing layer:
+- Three MCP servers can eat 140k tokens before real work starts.
+- Copied skills ship hidden instructions nobody reads.
+- Existing tools manage *servers*; none route *tasks* across *all* installed capabilities, and none screen what you install.
+
+Lockkeeper is the missing layer between your task and your toolbox:
 
 | Layer | Command | Status |
 |---|---|---|
-| Index & inventory | `cap rebuild`, `cap check` | ✅ shipped |
-| Task routing | `cap search`, `cap bundle` / `route` | ✅ shipped |
-| Prompt-injection firewall | `cap audit` | ✅ shipped (static) |
-| Install & lock | `cap install`, `cap.lock` | 🔜 roadmap |
-| Remote discovery | `cap search --remote` | 🔜 roadmap |
+| Index and inventory | `lockkeeper rebuild`, `lockkeeper check` | ✅ shipped |
+| Task routing | `lockkeeper search`, `lockkeeper route` / `bundle` | ✅ shipped |
+| Prompt-injection firewall | `lockkeeper audit`, `lockkeeper hook` | ✅ shipped (static + live) |
+| Signed audit receipts | `--receipt-out` / `--verify-receipt` | ✅ shipped |
+| Dependency CVE gate | `--check-deps` (osv.dev) | ✅ shipped |
+| Install and lock | `lockkeeper install`, `cap.lock` | 🔜 roadmap |
+| Remote discovery | `lockkeeper search --remote` | 🔜 roadmap |
 
 See [ROADMAP.md](ROADMAP.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## The firewall
+
+Every capability folder, plugin manifest, MCP config, and live tool call can pass through `lockkeeper audit`: a dependency-free static scanner with verdicts you can gate on.
+
+```mermaid
+flowchart LR
+    A["Skill folder,<br/>manifest, or hook payload"] --> C{"lockkeeper audit"}
+    C -- clean --> G["✅ allow"]
+    C -- suspect --> W["⚠️ warn"]
+    C -- hostile --> X["⛔ block · exit 2"]
+    C -.-> Rc["HMAC-SHA256<br/>signed receipt"]
+```
+
+It detects instruction-override phrasing, exfiltration pipelines (secrets → curl/wget/nc), credential-store access, obfuscated execution (`base64 -d | sh`), destructive commands, hidden directive comments, and invisible or homoglyph Unicode. Executable payloads (`.pyc`, `.so`, `.dll`, `.wasm`) inside an audited directory can't be text-scanned, so they're hashed and floored to at least `suspect`: a skill that ships bytecode never audits clean.
+
+Verdicts map to CI-friendly exit codes (`clean` / `suspect` / `hostile` → `0` / `1` / `2` under `--strict`). Every JSON finding carries a SkillTrustBench `taxonomy` tag (T01–T09) so results stay comparable across skill-security tooling. With `--check-deps`, pinned dependencies are checked against osv.dev; with `--llm-scan` (opt-in twice: flag plus environment variables), an OpenAI-compatible endpoint adds a second-pass review that the offline scanner never depends on.
+
+### Verifiable evidence
+
+```sh
+lockkeeper audit ~/skills/some-skill --recursive --strict \
+  --receipt-out receipt.json --receipt-key key.hex
+# later, prove nothing was altered:
+lockkeeper audit --verify-receipt receipt.json --receipt-key key.hex   # exit 0 valid, 1 tampered
+```
+
+Receipts bind to the requested targets and the paths actually scanned, so they're evidence, not decoration. Useful as CI artifacts and audit trails.
+
+### Watching live tool calls
+
+Beyond static files, register the firewall as a Claude Code hook and hostile tool calls are blocked before execution:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [{ "command": "lockkeeper hook", "timeout": 5000 }]
+  }
+}
+```
+
+Works with any harness that supports stdin JSON hooks (Claude Code, Codex, ...).
 
 ## Install
 
 ### Way 1 — no terminal skills required (one paste)
 
-Copy the prompt in [PROMPT.md](PROMPT.md) and paste it into any AI coding agent
-you already have. It installs cap, binds it to every harness it finds on your
-machine, builds the index, and reports back in plain language.
+Copy the prompt in [PROMPT.md](PROMPT.md) and paste it into any AI coding agent you already have. It installs Lockkeeper, binds it to every harness it finds on your machine, builds the index, and reports back in plain language.
 
 ### Way 2 — terminal, zero manual wiring
 
 ```sh
-git clone https://github.com/Hannay001/cap.git
-cd cap
-./install.sh        # symlinks `cap`, then auto-detects and binds every harness on this machine
-cap snapshot-runtimes
-cap rebuild
-cap doctor          # shows each bound harness and its skill count
+git clone https://github.com/Hannay001/lockkeeper.git
+cd lockkeeper
+./install.sh        # symlinks `lockkeeper`, then auto-detects and binds every harness on this machine
+lockkeeper snapshot-runtimes
+lockkeeper rebuild
+lockkeeper doctor          # shows each bound harness and its skill count
 ```
 
-`./install.sh` scans for Claude Code, Codex, Cursor, Jcode, Hermes, OpenCode,
-Gemini, Copilot, Windsurf, Cline — **plus anything unknown** that looks like an
-agent harness under your home directory. Bindings are written to
-`config/local.toml` (git-ignored, machine-local).
-
-Selective binding:
+The installer scans for Claude Code, Codex, Cursor, Jcode, Hermes, OpenCode, Gemini, Copilot, Windsurf, Cline, plus anything unknown that looks like an agent harness under your home directory. Bindings land in `config/local.toml` (git-ignored, machine-local).
 
 ```sh
 CAP_RUNTIMES=claude,codex ./install.sh   # bind only these two
 CAP_NO_INIT=1 ./install.sh               # install without auto-binding
 ```
 
-### Route and audit
+### Route and audit in 30 seconds
 
 ```sh
-# Route a task to a bounded portfolio from any bound harness's perspective
-cap route --runtime claude --stdin --max 8 <<'CAPABILITY_QUERY'
+# Route a task from any bound harness's perspective
+lockkeeper route --runtime claude --stdin --max 8 <<'CAPABILITY_QUERY'
 audit our payment webhook for race conditions
 CAPABILITY_QUERY
 
 # Audit any skill folder before installing it
-cap audit ~/Downloads/some-skill --recursive --strict
+lockkeeper audit ~/Downloads/some-skill --recursive --strict
 ```
-
-### Auditing skills (the firewall)
-
-`cap audit` scans SKILL.md files, plugin manifests, and MCP configs for:
-
-- instruction-override phrasing ("ignore previous instructions…") <!-- cap-audit-suppress -->
-- exfiltration pipelines (secrets/ssh/env → curl/wget/nc)
-- credential-store access (`~/.ssh`, keychain, `.aws`, `.env`) <!-- cap-audit-suppress -->
-- obfuscated execution (`base64 -d | sh`, eval'd fetches) <!-- cap-audit-suppress -->
-- destructive commands (`rm -rf ~`, force-push to main)
-- hidden directive comments and invisible/homoglyph Unicode
-
-Verdicts: `clean` / `suspect` / `hostile`. With `--strict`, exit codes gate
-installs and CI: 0 / 1 / 2. A missing or non-auditable target under `--strict`
-also fails the gate. First-party docs that quote attack patterns can carry a
-`cap-audit-suppress` marker on a line. Outside cap's own repository the
-marker is inert and its presence is reported as a high finding; inside the
-repo, quoted attack patterns may be suppressed and each usage is still
-surfaced as a medium finding.
-
-Every JSON finding carries a `taxonomy` tag from the SkillTrustBench
-T01-T09 categories (instruction hijacking, memory poisoning, network egress,
-embedded malicious code, access abuse), so results stay comparable with other
-skill-security tooling.
-
-Executable payloads (`.pyc`, `.so`, `.dll`, `.wasm`, ...) inside an audited
-directory are not text-scannable, so they are hashed and floored to at least
-`suspect` -- a capability folder that ships bytecode never audits clean.
-
-With `--check-deps`, pinned `requirements.txt` / `package.json` dependencies
-are checked against the keyless osv.dev API; known-vulnerable pins are
-reported as high findings (taxonomy T08). The check degrades gracefully to an
-informational note when offline, so CI gates never fail on network flake.
-
-For deeper review, `--llm-scan` adds a second-pass LLM review of every
-audited file. It stays **strictly off unless you opt in twice**: pass the
-flag *and* export `CAP_LLM_ENDPOINT`, `CAP_LLM_MODEL`, and
-`CAP_LLM_API_KEY` (any OpenAI-compatible endpoint). Provider failures only
-add informational notes; the offline regex firewall never depends on it.
-
-Every scan can produce **verifiable evidence**: `--receipt-out cap.json
---receipt-key key.hex` writes an HMAC-SHA256-signed receipt of the full
-report. Anyone holding the key can later confirm nothing was altered with
-`cap audit --verify-receipt cap.json --receipt-key key.hex` (exit 0 valid /
-1 tampered). Useful as CI artifacts and audit trails.
-
-### Watching live tool calls (`cap hook`)
-
-Beyond static files, the firewall can watch runtime traffic. Register it as
-a Claude Code hook and any hostile tool call (exfil one-liners, credential
-reads) is blocked before execution:
-
-```json
-{
-  "hooks": {
-    "PreToolUse": [{ "command": "cap hook", "timeout": 5000 }]
-  }
-}
-```
-
-`cap hook` reads the hook payload from stdin, scans it with the same rules,
-allows clean/suspect calls (suspects warn on stderr), and blocks hostile ones
-with exit code 2. Works with any harness that supports command hooks reading
-stdin JSON (Claude Code, Codex, ...).
 
 ## Configuration
 
-Structural paths come from `config/default.toml`; add per-project overlays as
-`config/<name>.toml` and select them with `--project <name>`. Project-specific
-routing policy (deny lists, required-context lanes) lives in declarative
-**policy packs**: `policies/<project>.json`. See
-[policies/example.json](policies/example.json).
+Structural paths come from `config/default.toml`; add per-project overlays as `config/<name>.toml` and select them with `--project <name>`. Project-specific routing policy lives in declarative **policy packs**: see [policies/example.json](policies/example.json).
 
-`cap snapshot-runtimes` and `cap rebuild` write runtime inventory to a
-machine-local state dir (`~/.local/state/cap/`), never into your clone. The
-copies under `data/snapshots/` are read-only seeds used before the first
-snapshot run, so `git status` stays clean after normal use.
+`lockkeeper snapshot-runtimes` and `lockkeeper rebuild` write runtime inventory to a machine-local state dir (`~/.local/state/cap/`), never into your clone. The copies under `data/snapshots/` are read-only seeds used before the first snapshot run, so `git status` stays clean after normal use.
 
-The optional semantic sidecar (`embedder/`) adds embedding re-ranking on top of
-lexical scoring; everything works without it.
+The optional semantic sidecar (`embedder/`) adds embedding re-ranking on top of lexical scoring; everything works without it.
 
 ## Development
 
 ```sh
-HOME="$(mktemp -d)" python3.11 -m unittest \
-  tests.test_router_config tests.test_router_integration tests.test_cap_audit
+HOME="$(mktemp -d)" python3.11 -m unittest discover -s tests -p "test_*.py" -t .
+ruff check .
+python3 scripts/cap_audit.py            # self-audit
 ```
 
-Requirements: Python 3.11+. No third-party dependencies in the core path.
-Platforms: Linux and macOS are first-class today. Windows works under WSL;
-native Windows support (Developer Mode symlinks or junctions) is on the
-roadmap — see ROADMAP.md.
+Requirements: Python 3.11+, no third-party dependencies in the core path. macOS and Linux are first-class today; Windows works under WSL, native support is on the roadmap.
+
+## Security
+
+Found a bypass or vulnerability? Please report privately per [SECURITY.md](SECURITY.md) rather than opening a public issue.
 
 ## License
 

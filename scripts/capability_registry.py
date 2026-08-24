@@ -76,7 +76,7 @@ def _bootstrap_seed_snapshots(config) -> None:
     """Copy checked-in seed snapshots into the machine-local state dir once.
 
     The repo ships placeholder snapshots so a fresh clone can build an index
-    before the first `cap snapshot-runtimes`; runtime writes always target the
+    before the first `lockkeeper snapshot-runtimes`; runtime writes always target the
     state dir, never the clone.
     """
     import shutil as _shutil
@@ -244,7 +244,7 @@ AUTO_REFRESHABLE_STALENESS = (
 PINNED_SKILL_PATHS: dict[str, Path] = {}
 
 # Optional per-deployment migration list: MCP server names that should be
-# treated as retired (excluded from discovery and flagged by `cap check`).
+# treated as retired (excluded from discovery and flagged by `lockkeeper check`).
 # Populate via config [extensions] legacy_mcp_names = ["..."].
 LEGACY_MCP_NAMES: frozenset[str] = frozenset()
 SKIP_DIRS = {
@@ -2499,10 +2499,10 @@ def update_project_catalog_pointer(manifest: dict[str, Any]) -> None:
             "the shared registry and is never loaded wholesale.",
             "",
             "```bash",
-            "cap bundle --stdin --runtime codex <<'CAPABILITY_QUERY'",
+            "lockkeeper bundle --stdin --runtime codex <<'CAPABILITY_QUERY'",
             "task keywords",
             "CAPABILITY_QUERY",
-            "cap search --stdin --runtime codex <<'CAPABILITY_SEARCH'",
+            "lockkeeper search --stdin --runtime codex <<'CAPABILITY_SEARCH'",
             "task keywords",
             "CAPABILITY_SEARCH",
             "```",
@@ -2571,14 +2571,14 @@ def render_index(manifest: dict[str, Any], files_by_category: dict[str, list[str
             "## Commands",
             "",
             "```bash",
-            "cap search --stdin --runtime codex <<'CAPABILITY_SEARCH'",
+            "lockkeeper search --stdin --runtime codex <<'CAPABILITY_SEARCH'",
             "task keywords",
             "CAPABILITY_SEARCH",
-            "cap bundle --stdin --runtime codex <<'CAPABILITY_QUERY'",
+            "lockkeeper bundle --stdin --runtime codex <<'CAPABILITY_QUERY'",
             "task keywords",
             "CAPABILITY_QUERY",
-            "cap rebuild",
-            "cap check --links",
+            "lockkeeper rebuild",
+            "lockkeeper check --links",
             "```",
             "",
         ]
@@ -2913,9 +2913,9 @@ def ensure_query_registry_fresh(output: Path) -> None:
                 rebuild(output, quiet=True)
                 # Deliberately NO reindex_semantic here: embedding can take many
                 # minutes on large corpora and semantic_hits() fails open to
-                # lexical-only until `cap reindex` runs explicitly. Routing
+                # lexical-only until `lockkeeper reindex` runs explicitly. Routing
                 # recovery must stay bounded; surface linking stays an explicit
-                # lifecycle step (`cap link`) so machines without every harness
+                # lifecycle step (`lockkeeper link`) so machines without every harness
                 # can still route.
             assert_registry_fresh(output, deep=False)
         except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as refresh_error:
@@ -4010,13 +4010,13 @@ def bundle(
                 "status": "warning",
                 "summary": (
                     f"no eligible primary capability in the index yet; "
-                    f"run `cap snapshot-runtimes && cap rebuild` after installing skills "
+                    f"run `lockkeeper snapshot-runtimes && lockkeeper rebuild` after installing skills "
                     f"(query kept: {clean_text(query)[:80]})"
                 ),
                 "bundle": [],
                 "next_actions": [
                     "Install or author skills for your harness(es).",
-                    "Re-run `cap rebuild`, then retry the route.",
+                    "Re-run `lockkeeper rebuild`, then retry the route.",
                 ],
                 "artifacts": {"index": str(output / "Capabilities.md")},
             }
@@ -4715,7 +4715,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = RegistryArgumentParser(
         prog="capability-registry",
         description=DESCRIPTION,
-        epilog="config-independent commands: 'cap audit', 'cap hook', 'cap init', 'cap doctor'",
+        epilog="config-independent commands: 'lockkeeper audit', 'lockkeeper hook', 'lockkeeper init', 'lockkeeper doctor'",
     )
     parser.add_argument("--output", type=Path, default=ROUTER_CONFIG.output_dir, help="Registry output directory")
     parser.add_argument(

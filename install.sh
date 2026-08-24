@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install `cap` by symlinking the launcher into ~/.local/bin (or a prefix of
+# Install `lockkeeper` by symlinking the launcher into ~/.local/bin (or a prefix of
 # your choice via PREFIX=...).
 set -eu
 
@@ -17,7 +17,8 @@ for name in cap capability-registry; do
     fi
 done
 
-ln -sfn "$REPO_ROOT/scripts/capability-registry" "$PREFIX/cap"
+ln -sfn "$REPO_ROOT/scripts/capability-registry" "$PREFIX/lockkeeper"
+ln -sfn "$REPO_ROOT/scripts/capability-registry" "$PREFIX/cap"  # deprecated alias
 ln -sfn "$REPO_ROOT/scripts/capability-registry" "$PREFIX/capability-registry"
 
 # Auto-bind: detect every harness on this machine and write local bindings.

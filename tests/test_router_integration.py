@@ -362,8 +362,8 @@ class IsolatedRegistryTest(unittest.TestCase):
 
         generated = catalog.read_text(encoding="utf-8")
         self.assertIn("category-sharded under the shared registry", generated)
-        self.assertIn("cap bundle --stdin --runtime codex", generated)
-        self.assertIn("cap search --stdin --runtime codex", generated)
+        self.assertIn("lockkeeper bundle --stdin --runtime codex", generated)
+        self.assertIn("lockkeeper search --stdin --runtime codex", generated)
         self.assertNotIn("node scripts/capability-catalog.mjs", generated)
         self.assertNotIn("](Capabilities.md)", generated)
 

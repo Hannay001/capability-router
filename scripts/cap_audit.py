@@ -26,7 +26,7 @@ import unicodedata
 import urllib.request
 
 if sys.version_info < (3, 11):
-    raise SystemExit("cap audit requires Python 3.11 or newer")
+    raise SystemExit("lockkeeper audit requires Python 3.11 or newer")
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Optional
@@ -42,7 +42,7 @@ BINARY_PAYLOAD_SUFFIXES = {
     ".pyc", ".pyo", ".pyd", ".so", ".dylib", ".dll", ".exe", ".wasm", ".o", ".a"
 }
 
-# Indicative mapping from cap rules to Tencent SkillTrustBench categories
+# Indicative mapping from lockkeeper rules to Tencent SkillTrustBench categories
 # (T01 instruction hijacking, T02 memory poisoning, T03 remote payload /
 # network egress, T04 embedded malicious code, T05 privilege & access abuse,
 # T08 insecure dependencies, T09 insecure practices). Meta-findings carry an
@@ -875,7 +875,7 @@ def run_audit_flow(
                         )
                     )
             if errors:
-                print(f"cap audit: llm second-pass had {errors} error(s)", file=_sys.stderr)
+                print(f"lockkeeper audit: llm second-pass had {errors} error(s)", file=_sys.stderr)
     if check_deps:
         for target in targets:
             dep_findings, _checked = dependency_findings(target)
@@ -1224,7 +1224,7 @@ def main_hook(argv: Optional[list[str]] = None) -> int:
     import sys
 
     parser = argparse.ArgumentParser(
-        prog="cap hook",
+        prog="lockkeeper hook",
         description="Scan a live tool-call payload from stdin; exit 2 blocks the call",
     )
     parser.add_argument("--json", action="store_true", help="Emit the full report as JSON")
@@ -1262,10 +1262,10 @@ def main_hook(argv: Optional[list[str]] = None) -> int:
     else:
         emit([report], False)
     if report.verdict == "hostile":
-        print(f"cap hook: blocked {tool_name} (hostile content)", file=sys.stderr)
+        print(f"lockkeeper hook: blocked {tool_name} (hostile content)", file=sys.stderr)
         return 2
     if report.verdict == "suspect":
-        print("cap hook: suspect content allowed; review recommended", file=sys.stderr)
+        print("lockkeeper hook: suspect content allowed; review recommended", file=sys.stderr)
     return 0
 
 
