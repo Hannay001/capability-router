@@ -81,6 +81,8 @@ def _bootstrap_seed_snapshots(config) -> None:
     """
     import shutil as _shutil
 
+    if not config.get_extension("seed_snapshots", False):
+        return
     seed_root = Path(__file__).resolve().parents[1] / "data" / "snapshots"
     if not seed_root.is_dir() or config.snapshot_dir.resolve(strict=False) == seed_root.resolve(strict=False):
         return

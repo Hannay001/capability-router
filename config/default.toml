@@ -18,3 +18,8 @@ skill_catalog_csv = "~/.local/state/cap/SKILL-CATALOG.csv"
 [hermes]
 profiles = []
 shared_surface_root = "~/.hermes/cap-shared-skills"
+
+[extensions]
+# Copy the read-only seeds in data/snapshots into the machine-local state dir
+# on first use, so a fresh clone can build an index before snapshot-runtimes.
+seed_snapshots = true
