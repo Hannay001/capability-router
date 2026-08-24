@@ -75,7 +75,7 @@ class IsolatedRouterConfigTest(unittest.TestCase):
     def test_precedence_is_builtin_then_default_then_project_then_explicit_env(self) -> None:
         builtin = self.builtins()
         self.assertEqual(builtin.output_dir, self.home / ".agents" / "capabilities")
-        self.assertEqual(builtin.snapshot_dir, self.root / "data" / "snapshots")
+        self.assertEqual(builtin.snapshot_dir, Path.home() / ".local" / "state" / "cap" / "snapshots")
 
         default_path = self.write_config(
             "default.toml",
@@ -169,7 +169,7 @@ class IsolatedRouterConfigTest(unittest.TestCase):
         )
         self.assertEqual(
             router_config.load_router_config(script_path=self.script_path).catalog_path,
-            self.root / "data" / "CAPABILITIES-DETAIL.md",
+            Path.home() / ".local" / "state" / "cap" / "CAPABILITIES-DETAIL.md",
         )
 
         for contents, error in (
@@ -255,7 +255,7 @@ class IsolatedRouterConfigTest(unittest.TestCase):
     def test_missing_selected_project_config_fails_but_no_default_config_uses_builtins(self) -> None:
         self.assertEqual(
             router_config.load_router_config(script_path=self.script_path).catalog_path,
-            self.root / "data" / "CAPABILITIES-DETAIL.md",
+            Path.home() / ".local" / "state" / "cap" / "CAPABILITIES-DETAIL.md",
         )
         with self.assertRaisesRegex(router_config.RouterConfigError, "file does not exist"):
             router_config.load_router_config(project_name="missing", script_path=self.script_path)

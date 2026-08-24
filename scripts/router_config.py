@@ -72,12 +72,15 @@ def _router_root(script_path: Path | None) -> Path:
 
 def _builtin_config(script_path: Path | None) -> RouterConfig:
     root = _router_root(script_path)
-    snapshot_dir = root / "data" / "snapshots"
+    # Runtime-mutable snapshots live in a machine-local state dir so a clone
+    # never accumulates personal inventory as modified tracked files. The
+    # copies under data/snapshots are read-only seeds bootstrapped on first use.
+    snapshot_dir = Path.home() / ".local" / "state" / "cap" / "snapshots"
     return RouterConfig(
         output_dir=Path.home() / ".agents" / "capabilities",
         project_name="",
         snapshot_dir=snapshot_dir,
-        catalog_path=root / "data" / "CAPABILITIES-DETAIL.md",
+        catalog_path=snapshot_dir.parent / "CAPABILITIES-DETAIL.md",
         mcp_config_paths=(root / ".mcp.json",),
         surface_roots=(root,),
         cwd=root,

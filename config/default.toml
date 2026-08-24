@@ -6,14 +6,14 @@ claude_json_path = "~/.claude.json"
 
 [project]
 name = ""
-snapshot_dir = "../data/snapshots"
-catalog_path = "../data/CAPABILITIES-DETAIL.md"
+snapshot_dir = "~/.local/state/cap/snapshots"
+catalog_path = "~/.local/state/cap/CAPABILITIES-DETAIL.md"
 mcp_config_paths = []
 surface_roots = []
 cwd = ".."
 first_party_roots = [".."]
 hermes_project_source = "../skills"
-skill_catalog_csv = "../data/SKILL-CATALOG.csv"
+skill_catalog_csv = "~/.local/state/cap/SKILL-CATALOG.csv"
 
 [hermes]
 profiles = []
