@@ -17,14 +17,14 @@ while [ -L "$source" ]; do
         printf '%s\n' "status: error" "summary: capability-registry launcher symlink loop detected" >&2
         exit 1
     fi
-    source_dir=$(CDPATH= cd -P "$(dirname "$source")" && pwd) || exit 1
+    source_dir=$(CDPATH='' cd -P "$(dirname "$source")" && pwd) || exit 1
     target=$(readlink "$source") || exit 1
     case $target in
         /*) source=$target ;;
         *) source=$source_dir/$target ;;
     esac
 done
-script_dir=$(CDPATH= cd -P "$(dirname "$source")" && pwd) || exit 1
+script_dir=$(CDPATH='' cd -P "$(dirname "$source")" && pwd) || exit 1
 registry=$script_dir/capability_registry.py
 
 supports_python() {
