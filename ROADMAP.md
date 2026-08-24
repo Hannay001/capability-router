@@ -61,8 +61,8 @@ local, dependency-free install-time firewall -- that gap is cap's niche.
 - [x] `cap hook`: Claude Code / Codex hook mode scanning live tool payloads
       (PreToolUse-style stdin/stdout contract), extending the firewall from
       files to runtime traffic.
-- [ ] Optional LLM deep-scan tier behind a provider plug-in interface
-      (offline regex remains the default; see v1.1 below).
+- [x] Optional LLM deep-scan tier: `--llm-scan` with an OpenAI-compatible
+      provider via env config; off by default, failures degrade to info.
 - [x] Dependency CVE gate: check skill-declared dependencies against
       osv.dev (keyless, cached) during `cap audit`.
 - [x] Signed audit receipts: locally-verifiable scan reports for CI evidence.

@@ -130,6 +130,12 @@ are checked against the keyless osv.dev API; known-vulnerable pins are
 reported as high findings (taxonomy T08). The check degrades gracefully to an
 informational note when offline, so CI gates never fail on network flake.
 
+For deeper review, `--llm-scan` adds a second-pass LLM review of every
+audited file. It stays **strictly off unless you opt in twice**: pass the
+flag *and* export `CAP_LLM_ENDPOINT`, `CAP_LLM_MODEL`, and
+`CAP_LLM_API_KEY` (any OpenAI-compatible endpoint). Provider failures only
+add informational notes; the offline regex firewall never depends on it.
+
 Every scan can produce **verifiable evidence**: `--receipt-out cap.json
 --receipt-key key.hex` writes an HMAC-SHA256-signed receipt of the full
 report. Anyone holding the key can later confirm nothing was altered with

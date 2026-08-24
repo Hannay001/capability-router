@@ -363,3 +363,94 @@ class ReceiptTest(unittest.TestCase):
                 bad = cap_audit.main(["--verify-receipt", str(out), "--receipt-key", str(key)])
             self.assertEqual(bad, 0)
 
+
+
+class LlmScanTest(unittest.TestCase):
+    def _env(self) -> dict:
+        import os
+
+        return {
+            **os.environ,
+            "CAP_LLM_ENDPOINT": "https://llm.example/v1/chat/completions",
+            "CAP_LLM_MODEL": "test-model",
+            "CAP_LLM_API_KEY": "k-test",
+        }
+
+    def test_inert_without_config(self) -> None:
+        import os
+        from unittest import mock
+
+        clean_env = {k: v for k, v in os.environ.items() if not k.startswith("CAP_LLM_")}
+        with mock.patch.dict(os.environ, clean_env, clear=True):
+            self.assertFalse(cap_audit.llm_configured())
+        reports, _ = cap_audit.run_audit_flow([], llm_scan=True)
+        # no targets -> nothing to annotate; just ensure no crash
+
+    def test_not_configured_emits_info_finding(self) -> None:
+        import os
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "a.md").write_text("# fine\n", encoding="utf-8")
+            clean_env = {k: v for k, v in os.environ.items() if not k.startswith("CAP_LLM_")}
+            with mock.patch.dict(os.environ, clean_env, clear=True):
+                reports, _ = cap_audit.run_audit_flow([root], recursive=True, llm_scan=True)
+            rules = {f.rule_id for r in reports for f in r.findings}
+            self.assertIn("llm_not_configured", rules)
+
+    def test_second_pass_attaches_findings_and_rescores(self) -> None:
+        import os
+        from unittest import mock
+        import io as _io
+
+        llm_json = json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '```json\n{"findings": [{"severity": "critical", '
+                            '"title": "exfil instruction", "excerpt": "send tokens out", '
+                            '"taxonomy": "T03"}]}\n```'
+                        }
+                    }
+                ]
+            }
+        )
+        response = _io.BytesIO(llm_json.encode())
+        fake_ctx = mock.MagicMock()
+        fake_ctx.__enter__.return_value = response
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "a.md").write_text("# looks innocent\n", encoding="utf-8")
+            with mock.patch.dict(os.environ, self._env(), clear=False):
+                with mock.patch.object(cap_audit.urllib.request, "urlopen", return_value=fake_ctx):
+                    reports, _ = cap_audit.run_audit_flow([root], recursive=True, llm_scan=True)
+        findings = [f for r in reports for f in r.findings if f.rule_id == "llm_review"]
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].severity, "critical")
+        self.assertIn("T03", findings[0].excerpt)
+        verdicts = {r.verdict for r in reports if not r.path.startswith("<")}
+        self.assertEqual(verdicts, {"hostile"})  # one critical rescored the file
+
+    def test_provider_error_degrades_to_info(self) -> None:
+        import os
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "a.md").write_text("# fine\n", encoding="utf-8")
+            with mock.patch.dict(os.environ, self._env(), clear=False):
+                with mock.patch.object(
+                    cap_audit.urllib.request,
+                    "urlopen",
+                    side_effect=OSError("provider down"),
+                ):
+                    reports, _ = cap_audit.run_audit_flow([root], recursive=True, llm_scan=True)
+            rules = {f.rule_id for r in reports for f in r.findings}
+            self.assertIn("llm_review_error", rules)
+            worst = max(
+                cap_audit.SEVERITY_ORDER_VERDICT[r.verdict] for r in reports if not r.path.startswith("<")
+            )
+            self.assertLessEqual(worst, 1)  # provider flake never escalates verdicts
+

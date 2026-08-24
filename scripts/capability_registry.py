@@ -4751,6 +4751,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Also check pinned requirements.txt/package.json deps against osv.dev (network; degrades offline)",
     )
+    audit_parser.add_argument(
+        "--llm-scan",
+        action="store_true",
+        help="Second-pass LLM review (needs CAP_LLM_ENDPOINT/MODEL/API_KEY)",
+    )
     audit_parser.add_argument("--receipt-out", type=Path)
     audit_parser.add_argument("--receipt-key", type=Path)
     audit_parser.add_argument("--verify-receipt", type=Path)
@@ -4808,6 +4813,7 @@ def _run_standalone(command: str, argv: list[str]) -> int:
             targets,
             recursive=getattr(args, "recursive", False),
             check_deps=getattr(args, "check_deps", False),
+            llm_scan=getattr(args, "llm_scan", False),
         )
         emit(reports, getattr(args, "json", False), skipped)
         if getattr(args, "verify_receipt", None):
