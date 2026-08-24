@@ -66,8 +66,11 @@ local, dependency-free install-time firewall -- that gap is cap's niche.
 - [x] Dependency CVE gate: check skill-declared dependencies against
       osv.dev (keyless, cached) during `cap audit`.
 - [x] Signed audit receipts: locally-verifiable scan reports for CI evidence.
-- [ ] Reranking study: body-aware second-stage ranking (metadata-only
-      selection degrades in large overlapping pools).
+- [x] Reranking study: body-aware second-stage ranking -- tested as a
+      post-hoc rescore over live registries (14 known-answer queries,
+      weights 10/25/45): Hit@1 unchanged, MRR slightly worse. Description-
+      level ranking is already saturated at personal-registry scale;
+      revisit only above ~50K overlapping skills or with a learned encoder.
 
 ## v1.2 — Install & lock (`cap install`, `cap.lock`)
 
