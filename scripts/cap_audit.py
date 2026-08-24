@@ -27,6 +27,37 @@ AUDIT_MAX_BYTES = 8 * 1024 * 1024
 
 AUDITABLE_SUFFIXES = {".md", ".json", ".toml", ".yaml", ".yml", ".mjs", ".js", ".py", ".sh", ".txt"}
 
+# Executable/bytecode payloads are not auditable as text, but shipping them
+# inside a capability directory is itself a smuggling signal: they are hashed
+# and floored to "suspect" instead of being silently ignored.
+BINARY_PAYLOAD_SUFFIXES = {
+    ".pyc", ".pyo", ".pyd", ".so", ".dylib", ".dll", ".exe", ".wasm", ".o", ".a"
+}
+
+# Indicative mapping from cap rules to Tencent SkillTrustBench categories
+# (T01 instruction hijacking, T02 memory poisoning, T03 remote payload /
+# network egress, T04 embedded malicious code, T05 privilege & access abuse,
+# T09 insecure practices). Meta-findings carry an empty taxonomy.
+RULE_TAXONOMY: dict[str, str] = {
+    "instruction_override": "T01",
+    "hidden_directive_text": "T01/T02",
+    "unclosed_comment_directive": "T01/T02",
+    "invisible_unicode": "T01",
+    "homoglyph_mixing": "T01",
+    "exfiltration_pipeline": "T03",
+    "pipeless_exfiltration": "T03",
+    "heredoc_exfiltration": "T03",
+    "url_data_beacon": "T03",
+    "backtick_substitution_exfil": "T03",
+    "non_text_payload": "T03",
+    "obfuscated_execution": "T04",
+    "non_utf8_content": "T04",
+    "oversized_skipped": "T04",
+    "credential_access": "T05",
+    "token_harvesting_env": "T05",
+    "destructive_command": "T05",
+}
+
 # (rule_id, severity, compiled regex, human title)
 RULES: list[tuple[str, str, re.Pattern[str], str]] = [
     (
@@ -203,6 +234,7 @@ class Finding:
             "title": self.title,
             "line": self.line,
             "excerpt": self.excerpt,
+            "taxonomy": RULE_TAXONOMY.get(self.rule_id, ""),
         }
 
 
@@ -339,11 +371,13 @@ def audit_bytes(path: Path, content: bytes) -> FileReport:
         )
     if suppressed:
         # Suppression is legitimate for first-party docs that quote attack
-        # patterns, but it must never be silent in a first-party file either.
+        # patterns, but it must never be silent either: first-party usage is
+        # surfaced at medium (visible, verdict-visible via three-plus counts)
+        # while the same marker in an untrusted file stays high.
         findings.append(
             Finding(
                 rule_id="suppress_marker_used",
-                severity="high",
+                severity="medium" if allow_suppression else "high",
                 title="cap-audit-suppress marker present (review intent)",
                 line=min(suppressed),
                 excerpt=f"{len(suppressed)} marker line(s)",
@@ -423,11 +457,41 @@ def _verdict(findings: list[Finding]) -> str:
 
 def audit_path(path: Path) -> Optional[FileReport]:
     resolved = path.expanduser()
+    if "__pycache__" in resolved.parts:
+        return None  # interpreter bytecode cache, not shipped capability content
     if resolved.is_symlink():
         # A symlinked file can point anywhere (e.g. ~/.ssh/id_rsa); auditing it  # cap-audit-suppress
         # would hash and excerpt out-of-scope content.
         return None
-    if not resolved.is_file() or resolved.suffix.lower() not in AUDITABLE_SUFFIXES:
+    if not resolved.is_file():
+        return None
+    suffix = resolved.suffix.lower()
+    if suffix in BINARY_PAYLOAD_SUFFIXES:
+        import hashlib
+
+        try:
+            with resolved.open("rb") as handle:
+                blob = handle.read(AUDIT_MAX_BYTES)
+        except OSError:
+            return None
+        oversized_blob = resolved.stat().st_size > AUDIT_MAX_BYTES
+        findings = [
+            Finding(
+                rule_id="non_text_payload",
+                severity="high",
+                title=(
+                    f"Executable payload ({suffix}) shipped inside capability directory"
+                    + "; oversize, hash covers prefix only"
+                    if oversized_blob
+                    else f"Executable payload ({suffix}) shipped inside capability directory"
+                ),
+                line=0,
+                excerpt=f"sha256={hashlib.sha256(blob).hexdigest()[:16]}",
+            )
+        ]
+        digest = hashlib.sha256(blob).hexdigest()
+        return FileReport(path=str(resolved), sha256=digest, verdict=_verdict(findings), findings=findings)
+    if suffix not in AUDITABLE_SUFFIXES:
         return None
     try:
         if resolved.stat().st_size > AUDIT_MAX_BYTES:
@@ -558,6 +622,59 @@ def main(argv: Optional[list[str]] = None) -> int:
         if skipped:
             return 1  # partially skipped: suspect-grade, per README strict contract
         return STRICT_EXIT_CODES[overall_verdict(reports)]
+    return 0
+
+
+def main_hook(argv: Optional[list[str]] = None) -> int:
+    """Runtime filter for coding-agent hooks (Claude Code / Codex contract).
+
+    Reads one hook payload from stdin. JSON payloads (PreToolUse shape with
+    ``tool_name`` / ``tool_input``) are scanned structurally; anything else is
+    scanned verbatim. Exit codes follow the hook convention:
+    0 = allow, 2 = block the tool call (reason goes to stderr).
+    """
+    import sys
+
+    parser = argparse.ArgumentParser(
+        prog="cap hook",
+        description="Scan a live tool-call payload from stdin; exit 2 blocks the call",
+    )
+    parser.add_argument("--json", action="store_true", help="Emit the full report as JSON")
+    args = parser.parse_args(argv)
+
+    raw = sys.stdin.read()
+    tool_name = "<stdin>"
+    body = raw
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        parsed = None
+    if isinstance(parsed, dict):
+        tool_name = str(parsed.get("tool_name") or "<stdin>")
+        body = f"tool_name: {tool_name}\n" + json.dumps(
+            parsed.get("tool_input", parsed), indent=1, ensure_ascii=True
+        )
+
+    report = audit_bytes(Path(f"<hook:{tool_name}>"), body.encode("utf-8"))
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "verdict": report.verdict,
+                    "sha256": report.sha256,
+                    "findings": [finding.to_dict() for finding in report.findings],
+                },
+                indent=2,
+                ensure_ascii=True,
+            )
+        )
+    else:
+        emit([report], False)
+    if report.verdict == "hostile":
+        print(f"cap hook: blocked {tool_name} (hostile content)", file=sys.stderr)
+        return 2
+    if report.verdict == "suspect":
+        print("cap hook: suspect content allowed; review recommended", file=sys.stderr)
     return 0
 
 

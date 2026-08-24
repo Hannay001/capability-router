@@ -4760,6 +4760,23 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def passthrough_argv(argv: list[str]) -> list[str]:
+    """Drop --project tokens; used by standalone commands with their own parsers."""
+    out: list[str] = []
+    skip_next = False
+    for token in argv[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if token == "--project":
+            skip_next = True
+            continue
+        if token.startswith("--project="):
+            continue
+        out.append(token)
+    return out
+
+
 def _run_standalone(command: str, argv: list[str]) -> int:
     """Run config-independent commands directly; infra failures exit 3."""
     stripped: list[str] = []
@@ -4789,28 +4806,21 @@ def _run_standalone(command: str, argv: list[str]) -> int:
             return STRICT_EXIT_CODES[overall_verdict(reports)]
         return 0
 
+    if command == "hook":
+        from cap_audit import main_hook
+
+        return main_hook([*passthrough_argv(argv)])
+
     from cap_setup import main as setup_main
 
-    passthrough: list[str] = []
-    skip_next = False
-    for token in argv[1:]:
-        if skip_next:
-            skip_next = False
-            continue
-        if token == "--project":
-            skip_next = True
-            continue
-        if token.startswith("--project="):
-            continue
-        passthrough.append(token)
-    return setup_main([command, *passthrough])
+    return setup_main([command, *passthrough_argv(argv)])
 
 
 def main() -> int:
     # Standalone commands must not depend on harness/router config health.
     _, pre_argv = split_project_argument(sys.argv[1:])
     first_command = next((tok for tok in pre_argv if not tok.startswith("-")), None)
-    if first_command in {"audit", "init", "doctor"}:
+    if first_command in {"audit", "init", "doctor", "hook"}:
         try:
             return _run_standalone(first_command, sys.argv[1:])
         except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as error:

@@ -116,6 +116,34 @@ also fails the gate. First-party docs that quote attack patterns can carry a
 `cap-audit-suppress` marker on a line; every marker usage is itself reported
 as a high finding, so a suppressed file can never audit clean.
 
+Every JSON finding carries a `taxonomy` tag from the SkillTrustBench
+T01-T09 categories (instruction hijacking, memory poisoning, network egress,
+embedded malicious code, access abuse), so results stay comparable with other
+skill-security tooling.
+
+Executable payloads (`.pyc`, `.so`, `.dll`, `.wasm`, ...) inside an audited
+directory are not text-scannable, so they are hashed and floored to at least
+`suspect` -- a capability folder that ships bytecode never audits clean.
+
+### Watching live tool calls (`cap hook`)
+
+Beyond static files, the firewall can watch runtime traffic. Register it as
+a Claude Code hook and any hostile tool call (exfil one-liners, credential
+reads) is blocked before execution:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [{ "command": "cap hook", "timeout": 5000 }]
+  }
+}
+```
+
+`cap hook` reads the hook payload from stdin, scans it with the same rules,
+allows clean/suspect calls (suspects warn on stderr), and blocks hostile ones
+with exit code 2. Works with any harness that supports command hooks reading
+stdin JSON (Claude Code, Codex, ...).
+
 ## Configuration
 
 Structural paths come from `config/default.toml`; add per-project overlays as

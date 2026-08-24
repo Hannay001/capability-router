@@ -14,7 +14,7 @@ Do exactly these steps:
 
 1. Check Python 3.11+ is available (python3 --version). If not, stop and tell me.
 2. Clone the repo into my home directory:
-   git clone https://github.com/<OWNER>/capability-router.git ~/capability-router
+   git clone https://github.com/Hannay001/capability-router.git ~/capability-router
 3. Run its installer, which also auto-detects every AI coding harness installed
    on this machine (Claude Code, Codex, Cursor, Jcode, Hermes, OpenCode,
    Gemini, or anything else) and binds cap to them automatically:

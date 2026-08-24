@@ -54,11 +54,11 @@ binary scanning), `pipelock` (egress firewall, signed action receipts),
 and-rerank at ~80K skills). None combines cross-runtime routing with a
 local, dependency-free install-time firewall -- that gap is cap's niche.
 
-- [ ] Taxonomy mapping: tag `cap audit` findings with T01-T09 categories so
+- [x] Taxonomy mapping: tag `cap audit` findings with T01-T09 categories so
       results are comparable with SkillTrustBench-class tools.
-- [ ] Non-text payloads: `.pyc`/binaries inside an audited directory get
+- [x] Non-text payloads: `.pyc`/binaries inside an audited directory get
       hashed and floored to `suspect` instead of being ignored silently.
-- [ ] `cap hook`: Claude Code / Codex hook mode scanning live tool payloads
+- [x] `cap hook`: Claude Code / Codex hook mode scanning live tool payloads
       (PreToolUse-style stdin/stdout contract), extending the firewall from
       files to runtime traffic.
 - [ ] Optional LLM deep-scan tier behind a provider plug-in interface
