@@ -225,7 +225,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         else:
             print(f"  [ ] {harness.name:<12} not detected")
     if not any_present:
-        print("  (no harnesses found — cap still works standalone with `cap audit`)")
+        print("  (no harnesses found — cap still works standalone with `lockkeeper audit`)")
 
     registry_manifest = Path.home() / ".agents" / "capabilities" / "manifest.json"
     if registry_manifest.is_file():

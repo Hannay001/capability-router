@@ -51,10 +51,10 @@ config (router_config.py)
 
 3. **Audit subsystem** (`scripts/cap_audit.py`): pure functions over file bytes
    → findings → verdict (`clean`/`suspect`/`hostile`). No network, no model by
-   default. Used standalone (`cap audit`) and as the gate for future installs.
+   default. Used standalone (`lockkeeper audit`) and as the gate for future installs.
    Suppression markers are always surfaced as findings themselves.
 4. **Installer** (planned, see ROADMAP): fetch → audit → hash-pin → place →
-   rebuild. Not implemented in this version; `cap install` does not exist yet.
+   rebuild. Not implemented in this version; `lockkeeper install` does not exist yet.
 5. **Packaging**: install.sh symlinks `cap`; pyproject packaging is deferred
    until the single-module layout becomes an importable package.
 

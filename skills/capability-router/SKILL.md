@@ -12,7 +12,7 @@ Use this skill at the start of a non-trivial task when the best capability set i
 Run:
 
 ```bash
-cap bundle --stdin --runtime <codex|claude|hermes|jcode> --max 8 <<'CAPABILITY_QUERY'
+lockkeeper bundle --stdin --runtime <codex|claude|hermes|jcode> --max 8 <<'CAPABILITY_QUERY'
 <task in concrete keywords>
 CAPABILITY_QUERY
 ```

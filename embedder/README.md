@@ -7,7 +7,7 @@ system python 3.14 is PEP-668 externally-managed, so an in-process import is imp
     ~/.agents/capabilities/embedder/.venv/bin/pip install -r requirements.txt
     cp embed.py ~/.agents/capabilities/embedder/
 
-Build the index (re-run after every `cap rebuild`; `check` reports staleness):
+Build the index (re-run after every `lockkeeper rebuild`; `check` reports staleness):
 
     FP=$(python3 -c "import json,pathlib;print(json.load(open(pathlib.Path.home()/'.agents/capabilities/manifest.json'))['fingerprint'])")
     ~/.agents/capabilities/embedder/.venv/bin/python ~/.agents/capabilities/embedder/embed.py \

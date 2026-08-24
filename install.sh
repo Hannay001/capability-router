@@ -38,4 +38,4 @@ echo "  $PREFIX/cap"
 echo "  $PREFIX/capability-registry (alias)"
 echo
 echo "Next steps:"
-echo "  cap snapshot-runtimes && cap rebuild && cap doctor"
+echo "  lockkeeper snapshot-runtimes && lockkeeper rebuild && lockkeeper doctor"
