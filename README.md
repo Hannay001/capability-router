@@ -12,6 +12,10 @@ Lockkeeper indexes every skill, MCP server, plugin, tool, agent, and command ins
 > Your agent doesn't need all your installed capabilities in context.
 > It needs the right 8, verified safe, for *this* task.
 
+<p align="center">
+  <img src="docs/demo.gif" alt="Lockkeeper routing a task to a bounded capability portfolio, catching an injection attack in a skill file, then verifying its signed receipt" width="86%">
+</p>
+
 ```console
 $ lockkeeper route --runtime claude --stdin <<'TASK'
 migrate the auth module to the new token API
