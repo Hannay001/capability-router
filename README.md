@@ -13,7 +13,16 @@ Lockkeeper indexes every skill, MCP server, plugin, tool, agent, and command ins
 > It needs the right 8, verified safe, for *this* task.
 
 <p align="center">
-  <img src="docs/demo.gif" alt="Lockkeeper routing a task to a bounded capability portfolio, catching an injection attack in a skill file, then verifying its signed receipt" width="86%">
+  <img src="docs/demo-route.png" alt="lockkeeper bundle routing a payment-webhook audit task to two primary skills, flagged as untrusted external content" width="72%">
+  <br><sub><b>1 · Route</b> — one query, a bounded portfolio instead of the whole toolbox</sub>
+</p>
+<p align="center">
+  <img src="docs/demo-audit.png" alt="lockkeeper audit flagging a skill as hostile for instruction override and a curl piped to sh exfiltration attempt" width="72%">
+  <br><sub><b>2 · Catch</b> — the firewall flags an injection attack; exit codes gate installs and CI</sub>
+</p>
+<p align="center">
+  <img src="docs/demo-receipt.png" alt="signed scan receipt verified intact with exit code zero" width="72%">
+  <br><sub><b>3 · Prove</b> — HMAC-signed receipts show evidence wasn't altered after the scan</sub>
 </p>
 
 ```console
