@@ -30,7 +30,7 @@ prompt-injection firewall.*
 
 - [x] Windows-blocking import (fcntl) made portable; per-OS venv paths,
       shutil.which CLI resolution, UTF-8 subprocess decoding.
-- [ ] Native Windows story: symlink privilege docs vs junction fallback,
+- [x] Native Windows story: symlink privilege docs vs junction fallback,
       sys.platform-guarded integration tests, windows-latest CI job.
 
 ## v1.1 — Audit firewall (`lockkeeper audit`) — SHIPPED

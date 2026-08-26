@@ -6,6 +6,7 @@ registry outputs, links, configuration files, and home-like paths are temporary.
 from __future__ import annotations
 
 import contextlib
+import functools
 import importlib
 import io
 import json
@@ -72,6 +73,20 @@ def resolve_supported_python() -> Path | None:
         if version is not None and version >= (3, 11):
             return candidate
     return None
+
+
+@functools.lru_cache(maxsize=None)
+def _symlink_capable() -> bool:
+    """Probe whether creating a symlink works in a scratch directory."""
+    probe = Path(tempfile.mkdtemp(prefix="capability-router-symlink-probe-"))
+    try:
+        try:
+            (probe / "link").symlink_to(probe / "target")
+        except OSError:
+            return False
+        return True
+    finally:
+        shutil.rmtree(probe, ignore_errors=True)
 
 
 class IsolatedRegistryTest(unittest.TestCase):
@@ -268,6 +283,7 @@ class IsolatedRegistryTest(unittest.TestCase):
         self.assertFalse(canonical_output.exists())
         self.assertFalse(noncanonical_output.exists())
 
+    @unittest.skipUnless(_symlink_capable(), "requires symlink privilege")
     def test_empty_surface_roots_keep_snapshot_system_link_without_project_index_or_categories(self) -> None:
         output = self.temp / "output"
         output.mkdir()
@@ -311,6 +327,7 @@ class IsolatedRegistryTest(unittest.TestCase):
         self.assertFalse((project_surface / "Capabilities.md").exists())
         self.assertEqual(list(project_surface.glob("Capabilities-*.md")), [])
 
+    @unittest.skipUnless(_symlink_capable(), "requires symlink privilege")
     def test_preflight_allows_only_identical_first_party_legacy_capability_router_link(self) -> None:
         shared_root = self.temp / "shared-hermes"
         shared_root.mkdir()
@@ -625,6 +642,10 @@ class RouterCliProjectSelectorTest(unittest.TestCase):
                 self.assertIn("only once", result.stderr)
 
 
+@unittest.skipUnless(
+    sys.platform != "win32" and _symlink_capable(),
+    "contract tests require the POSIX sh launcher and symlink privilege",
+)
 class SupportedPythonCliContractTest(unittest.TestCase):
     """Exercise copied router entrypoints without user-site Python dependencies."""
 

@@ -4126,9 +4126,15 @@ def archive_and_link(link: Path, target: Path, archive_dir: Path, label: str) ->
         shutil.move(str(link), archived_path)
     try:
         link.symlink_to(target, target_is_directory=target.is_dir())
-    except OSError:
+    except OSError as error:
         if archived_path and archived_path.exists():
             shutil.move(str(archived_path), link)
+        if sys.platform == "win32":
+            raise OSError(
+                f"could not create symlink {link} -> {target}: {error}. "
+                "On Windows, symlink creation requires Developer Mode or an "
+                "elevated shell; see docs/windows.md."
+            ) from error
         raise
 
 
