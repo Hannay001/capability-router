@@ -71,7 +71,7 @@ class InitBindingTest(unittest.TestCase):
         self.assertTrue(local.is_file())
         text = local.read_text(encoding="utf-8")
         self.assertIn("extra_skill_roots", text)
-        self.assertIn(".codex/skills", text.replace("\\", "/"))
+        self.assertIn(".codex/skills", text.replace("\\", "/").replace("//", "/"))
 
     def test_init_unknown_runtime_fails_without_force(self) -> None:
         import contextlib

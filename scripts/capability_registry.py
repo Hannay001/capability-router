@@ -840,7 +840,7 @@ def category_for(name: str, description: str, source_path: str, capability_type:
 
 
 def runtime_for_path(path: Path) -> str:
-    rendered = str(path)
+    rendered = path.as_posix()  # forward slashes on every OS so markers match on Windows
     for runtime in ("claude", "codex", "hermes", "jcode", "agents"):
         marker = f"/.{runtime}/"
         if marker in rendered:
@@ -900,18 +900,30 @@ def path_is_under(path: Path, parent: Path) -> bool:
         return False
 
 
+def _strip_windows_link_prefix(path_text: str) -> str:
+    """Drop the extended-length/UNC prefix Windows adds to readlink results."""
+    if path_text.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + path_text[8:]
+    if path_text.startswith("\\\\?\\"):
+        return path_text[4:]
+    return path_text
+
+
 def direct_symlink_target(path: Path) -> Optional[Path]:
     if not path.is_symlink():
         return None
     raw_target = Path(os.readlink(path))
     candidate = raw_target if raw_target.is_absolute() else path.parent / raw_target
-    return Path(os.path.abspath(candidate))
+    return Path(_strip_windows_link_prefix(os.path.abspath(candidate)))
 
 
 def symlink_points_directly(path: Path, target: Path) -> bool:
     immediate = direct_symlink_target(path)
+    if immediate is None:
+        return False
     expected = Path(os.path.abspath(target.resolve(strict=False)))
-    return immediate == expected
+    # normcase is identity on POSIX and makes Windows comparisons case-insensitive.
+    return os.path.normcase(str(immediate)) == os.path.normcase(str(expected))
 
 
 def trusted_capability_roots() -> tuple[Path, ...]:

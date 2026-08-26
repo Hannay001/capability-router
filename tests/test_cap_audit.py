@@ -627,7 +627,8 @@ class SwarmRegressionTest(unittest.TestCase):
             reports, _ = cap_audit.run_audit_flow([root], recursive=True)
             cap_audit.write_receipt_file(out, key, reports, auto_create_key=True)
             self.assertTrue(key.exists())
-            self.assertEqual(oct(key.stat().st_mode)[-3:], "600")
+            if sys.platform != "win32":  # POSIX modes are not enforced on Windows
+                self.assertEqual(oct(key.stat().st_mode)[-3:], "600")
 
     def test_direct_module_hook_dispatch(self) -> None:
         import subprocess

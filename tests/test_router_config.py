@@ -48,7 +48,12 @@ class IsolatedRouterConfigTest(unittest.TestCase):
         self.home.mkdir()
         self._environment = mock.patch.dict(
             os.environ,
-            {"HOME": str(self.home), "CAPABILITY_ROUTER_CONFIG": ""},
+            {
+                "HOME": str(self.home),
+                # Windows expanduser prefers USERPROFILE over HOME.
+                "USERPROFILE": str(self.home),
+                "CAPABILITY_ROUTER_CONFIG": "",
+            },
             clear=False,
         )
         self._environment.start()
