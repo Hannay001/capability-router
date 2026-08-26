@@ -22,3 +22,8 @@ data/SKILL-CATALOG.csv
 # Machine-local bindings from cap init
 config/local.toml
 data/snapshots/system
+
+# Python packaging artifacts
+build/
+dist/
+*.egg-info/

@@ -23,8 +23,9 @@ prompt-injection firewall.*
 - [x] Bundle lane heuristics read optional declarative **policy packs**
       (`policies/<project>.json`) instead of hardcoded capability names.
 - [x] MIT license, CI on Python 3.11–3.14, real README.
-- Deferred to v1.1: pyproject.toml packaging (needs the single-module import
-  layout refactored into a package first).
+- [x] pyproject.toml packaging (flat-module wheel via `package-dir = scripts`,
+      console entry points `lockkeeper` / `lockkeeper-audit` / `lockkeeper-hook`;
+      CI builds the artifact and functionally smokes it, including Windows).
 
 ## v1.0.x — Platform hardening
 
@@ -90,6 +91,24 @@ local, dependency-free install-time firewall -- that gap is lockkeeper's niche.
 - Live per-capability token-cost accounting.
 - Auto-loading only the top-k relevant capabilities per task (router-driven),
   instead of everything at startup.
+
+## Hardening backlog (from the Aug 2026 deep audit)
+
+Fixed in v1.1.x: long-line scan bypass (chunked windows), env-var
+interpolation exfiltration rule, credential-upload exfil rule,
+suppression-marker fail-open floor, stacked hidden-text floor, hook stdin
+cap, LLM-tier https-only + redacted egress, receipt-key O_EXCL|O_NOFOLLOW
+creation, atomic-write mode clamp, RecursionError-safe JSON parsing, and
+the mixed-type registry trust check that bricked read verbs.
+
+Deferred (documented design limits / tuning):
+- Router ranking: grow alias coverage beyond ~8% of records; add a
+  low-confidence floor for generic-term winners; recalibrate the semantic
+  admit threshold against real queries; intent-modifier features.
+- Evasion surface: paraphrased instruction overrides, multi-line command
+  continuations, base64/openssl without a pipe, fullwidth-Latin homoglyphs.
+- Local-trust hardening: prefer absolute harness CLI paths over PATH
+  lookup; verify sidecar interpreter ownership before execution.
 
 ## Non-goals
 

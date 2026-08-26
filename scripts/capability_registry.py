@@ -629,8 +629,10 @@ def atomic_write(path: Path, content: str) -> None:
             os.fsync(handle.fileno())
         try:
             # Preserve an existing destination's mode so republishing a shared
-            # file does not silently tighten permissions to 0600.
-            os.chmod(temp_path, _stat.S_IMODE(path.stat().st_mode))
+            # file does not silently tighten permissions to 0600, but clamp the
+            # ceiling so a pre-created permissive destination cannot stay
+            # world-writable.
+            os.chmod(temp_path, _stat.S_IMODE(path.stat().st_mode) & 0o644)
         except OSError:
             pass
         os.replace(temp_path, path)
@@ -657,7 +659,8 @@ def load_json(path: Path) -> dict[str, Any]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError, RecursionError):
+        # RecursionError: attacker-influencable manifests may nest arbitrarily deep.
         return {}
 
 
@@ -666,7 +669,7 @@ def load_required_json(path: Path, shape: dict[str, type]) -> dict[str, Any]:
         raise RuntimeError(f"Required runtime snapshot is missing: {path}")
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
+    except (OSError, json.JSONDecodeError, RecursionError) as error:
         raise RuntimeError(f"Required runtime snapshot is unreadable: {path}: {error}") from error
     if not isinstance(data, dict) or data.get("schema_version") != 1:
         raise RuntimeError(f"Required runtime snapshot has an invalid schema: {path}")
@@ -2776,7 +2779,10 @@ def load_registry(output: Path) -> list[dict[str, Any]]:
             row["type"] in {"skill", "agent", "command", "entrypoint"}
             and (
                 not row["source_path"]
-                or not capability_path_is_trusted(Path(row["source_path"]).expanduser(), "skill")
+                # Validate against the record's OWN type: the historical
+                # hardcoded "skill" rejected every .md agent/command/
+                # entrypoint source and bricked all read verbs.
+                or not capability_path_is_trusted(Path(row["source_path"]).expanduser(), row["type"])
             )
         ):
             raise RuntimeError(f"Untrusted {row['type']} source at registry line {line_number}")
@@ -2938,7 +2944,9 @@ def ensure_query_registry_fresh(output: Path) -> None:
 
 
 def query_terms(query: str) -> list[tuple[str, float]]:
-    normalized = clean_text(query).lower()
+    # Fold umlauts BEFORE tokenizing: the split pattern is ASCII-only and would
+    # otherwise shred words like "Kündigungsschreiben" into dead fragments.
+    normalized = fold_umlauts(clean_text(query).lower())
     base = [token for token in re.split(r"[^a-z0-9+#.-]+", normalized) if len(token) > 1]
     weighted: dict[str, float] = {}
     for token in base:
@@ -3411,7 +3419,7 @@ def ranked_records(
 def direct_relevance(record: dict[str, Any], query: str) -> int:
     tokens = {
         token
-        for token in re.split(r"[^a-z0-9+#.-]+", clean_text(query).lower())
+        for token in re.split(r"[^a-z0-9+#.-]+", fold_umlauts(clean_text(query).lower()))
         if len(token) > 2 and token not in GENERIC_QUERY_TERMS
     }
     text = f"{record['name']} {record['description']}".lower()

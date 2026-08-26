@@ -126,6 +126,48 @@ class IsolatedRegistryTest(unittest.TestCase):
         registry.configure_router(config)
         return config
 
+    def test_load_registry_accepts_agent_command_entrypoint_sources(self) -> None:
+        """Regression: the trust check used a hardcoded "skill" type, so every
+        .md agent/command/entrypoint record made load_registry raise and bricked
+        all read verbs on mixed registries."""
+        self.configure(output_dir=self.temp / "mixed-output")
+        trusted_root = self.temp / "trusted-root"
+        sources = {}
+        for name in ("AGENTS", "deploy-command", "review-entrypoint"):
+            directory = trusted_root / name
+            directory.mkdir(parents=True)
+            source = directory / f"{name}.md"
+            source.write_text(f"# {name}\n", encoding="utf-8")
+            sources[name] = source
+
+        rows = []
+        for index, capability_type in enumerate(("agent", "command", "entrypoint")):
+            name = list(sources)[index]
+            rows.append(
+                {
+                    "id": f"{capability_type}-{name}",
+                    "name": name,
+                    "type": capability_type,
+                    "description": "regression fixture",
+                    "category": "research-knowledge",
+                    "status": "active",
+                    "runtimes": ["claude"],
+                    "source_path": str(sources[name]),
+                    "registration_count": 1,
+                    "owner": "",
+                }
+            )
+        output = self.temp / "mixed-registry"
+        output.mkdir()
+        (output / "registry.jsonl").write_text(
+            "\n".join(json.dumps(row) for row in rows) + "\n",
+            encoding="utf-8",
+        )
+
+        with mock.patch.object(registry, "SKILL_ROOTS", [("shared", trusted_root, "skills-root")]):
+            records = registry.load_registry(output)
+        self.assertEqual([record["type"] for record in records], ["agent", "command", "entrypoint"])
+
     def test_output_directory_reaches_legacy_archive_alias_and_semantic_helpers(self) -> None:
         custom_output = self.temp / "custom-output"
         self.configure(output_dir=custom_output)

@@ -144,6 +144,15 @@ CAP_RUNTIMES=claude,codex ./install.sh   # bind only these two
 CAP_NO_INIT=1 ./install.sh               # install without auto-binding
 ```
 
+### Way 3 — pip install (wheel)
+
+```sh
+pip install git+https://github.com/Hannay001/lockkeeper.git
+lockkeeper doctor   # entry points: lockkeeper, lockkeeper-audit, lockkeeper-hook
+```
+
+This installs the CLI from the packaged wheel (CI builds and functionally smokes it on every push, including Windows). Harness auto-binding still uses `install.sh` or `lockkeeper init`.
+
 ### Route and audit in 30 seconds
 
 ```sh
