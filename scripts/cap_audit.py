@@ -1042,7 +1042,10 @@ def write_receipt_file(
             with os.fdopen(fd, "w") as handle:
                 handle.write(secrets.token_hex(32) + "\n")
                 handle.flush()
-                os.fchmod(handle.fileno(), 0o600)
+                if hasattr(os, "fchmod"):
+                    os.fchmod(handle.fileno(), 0o600)
+            # No fchmod (Windows): O_CREAT|O_EXCL already ruled out a symlink
+            # race, and Windows does not enforce POSIX file modes anyway.
 
     receipt = make_receipt(reports, skipped, targets=targets)
     receipt["hmac_sha256"] = sign_receipt(receipt, _load_receipt_key(key_path))
