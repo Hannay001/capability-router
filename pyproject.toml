@@ -9,7 +9,8 @@ description = "npm for your agent's context: cross-runtime capability routing wi
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "lockkeeper contributors" }]
+authors = [{ name = "Himanshu", email = "173780478+Hannay001@users.noreply.github.com" }]
+maintainers = [{ name = "Himanshu", email = "173780478+Hannay001@users.noreply.github.com" }]
 keywords = ["agents", "skills", "mcp", "prompt-injection", "security", "cli"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",

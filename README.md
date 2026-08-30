@@ -8,6 +8,8 @@
 
 Lockkeeper indexes every skill, MCP server, plugin, tool, agent, and command installed across your coding agents (Claude Code, Codex, Cursor, Jcode, Hermes, OpenCode, Gemini, Copilot, Windsurf, Cline). It routes any task to a bounded portfolio of the right capabilities and screens everything that crosses your agent's boundary with a built-in injection firewall.
 
+Built and maintained by [Himanshu (@Hannay001)](https://github.com/Hannay001), with contributions welcome.
+
 > Your agent doesn't need all your installed capabilities in context.
 > It needs the right 8, verified safe, for *this* task.
 
