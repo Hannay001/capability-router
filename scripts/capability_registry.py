@@ -237,6 +237,11 @@ AUTO_REFRESHABLE_STALENESS = (
     "Registry fingerprint ",
     "Runtime configuration changed after the registry was built",
     "Registry skill discovery is stale:",
+    # A recorded source that has since moved outside the trusted roots (e.g. a
+    # symlinked skill whose target left the tree) is a stale-registry state, not
+    # corruption: rebuild rediscovers from disk and drops the row. Query verbs
+    # must self-heal instead of bricking on an inventory the user can't see.
+    "Registry references an untrusted ",
 )
 # Optional per-deployment pinning: map a capability name to the only SKILL.md
 # path that may satisfy an exact-name choice (guards against shadow copies).
@@ -2785,7 +2790,9 @@ def load_registry(output: Path) -> list[dict[str, Any]]:
                 or not capability_path_is_trusted(Path(row["source_path"]).expanduser(), row["type"])
             )
         ):
-            raise RuntimeError(f"Untrusted {row['type']} source at registry line {line_number}")
+            raise RuntimeError(
+                f"Registry references an untrusted {row['type']} source at registry line {line_number}; run rebuild"
+            )
         records.append(row)
     record_ids = [record["id"] for record in records]
     if len(record_ids) != len(set(record_ids)):

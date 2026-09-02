@@ -168,6 +168,50 @@ class IsolatedRegistryTest(unittest.TestCase):
             records = registry.load_registry(output)
         self.assertEqual([record["type"] for record in records], ["agent", "command", "entrypoint"])
 
+    def test_moved_source_registry_row_is_recoverable_staleness_not_corruption(self) -> None:
+        """Regression: a recorded skill whose source later moved outside the
+        trusted roots (e.g. a symlinked skill whose target left the tree) made
+        load_registry raise, bricking bundle/route, search, check and export-csv.
+        It is a stale-registry state -- rebuild rediscovers from disk and drops
+        the row -- so the error must be actionable and classified as
+        auto-refreshable so query verbs self-heal instead of dead-ending."""
+        self.configure(output_dir=self.temp / "moved-output")
+        trusted_root = self.temp / "trusted-root"
+        trusted_root.mkdir(parents=True)
+        untrusted_source = self.temp / "elsewhere" / "capability-router" / "SKILL.md"
+        untrusted_source.parent.mkdir(parents=True)
+        untrusted_source.write_text("# capability-router\n", encoding="utf-8")
+
+        row = {
+            "id": "skill-moved",
+            "name": "capability-router",
+            "type": "skill",
+            "description": "regression fixture",
+            "category": "research-knowledge",
+            "status": "discoverable",
+            "runtimes": ["claude"],
+            "source_path": str(untrusted_source),
+            "registration_count": 1,
+            "owner": "",
+        }
+        output = self.temp / "moved-registry"
+        output.mkdir()
+        (output / "registry.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+        with mock.patch.object(registry, "SKILL_ROOTS", [("shared", trusted_root, "skills-root")]):
+            with self.assertRaises(RuntimeError) as caught:
+                registry.load_registry(output)
+
+        message = str(caught.exception)
+        # Actionable: the maintenance verbs surface this verbatim, so it must
+        # tell the user the recovery step rather than dead-ending.
+        self.assertIn("run rebuild", message)
+        # Recoverable: query verbs (bundle/route, search) must self-heal.
+        self.assertTrue(
+            registry.auto_refreshable_staleness(RuntimeError(message)),
+            "moved-source staleness must be auto-refreshable so routing recovers",
+        )
+
     def test_output_directory_reaches_legacy_archive_alias_and_semantic_helpers(self) -> None:
         custom_output = self.temp / "custom-output"
         self.configure(output_dir=custom_output)
