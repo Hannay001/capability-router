@@ -580,7 +580,7 @@ class RouterCliProjectSelectorTest(unittest.TestCase):
             registry.load_registry = lambda output: []
             registry.emit_bundle = lambda result, as_json: None
 
-            def bundle(records, query, runtime, project, max_count, output):
+            def bundle(records, query, runtime, project, max_count, output, **kwargs):
                 print(f"bundle_project={{project!r}}")
                 return {{}}
 
@@ -1088,3 +1088,99 @@ class PolicyPackBehaviorTest(unittest.TestCase):
             self._bundle_with_pack({"deny": [{"types": "mcp"}]}, records, query="feature")
         with self.assertRaisesRegex(RuntimeError, "unknown type"):
             self._bundle_with_pack({"deny": [{"types": ["not-a-type"]}]}, records, query="feature")
+
+    def test_bundle_reports_context_savings_counts_by_default(self) -> None:
+        # The default route must expose the count-based savings (free, in-memory)
+        # so the core value -- most capabilities kept out of context -- is visible
+        # without paying the per-file stat cost of the token estimate.
+        records = [self.record(f"feature-{index}", "skill") for index in range(6)]
+        result = self._bundle_with_pack({}, records, query="feature")
+        savings = result["savings"]
+        self.assertEqual(savings["eligible_capabilities"], 6)
+        self.assertEqual(savings["selected_capabilities"], len(result["bundle"]))
+        self.assertEqual(
+            savings["avoided_capabilities"],
+            savings["eligible_capabilities"] - savings["selected_capabilities"],
+        )
+        # Token estimate is opt-in: the default run must not claim to be estimated.
+        self.assertFalse(savings["estimated"])
+        self.assertNotIn("eligible_body_tokens", savings)
+
+    def test_bundle_savings_token_estimate_is_opt_in_and_body_only(self) -> None:
+        # With estimate_savings, the summary sizes real skill bodies on disk and
+        # excludes MCP/tool connectors (no local body is loaded for those).
+        skill_dir = self.temp / "skills" / "feature"
+        skill_dir.mkdir(parents=True)
+        skill_body = skill_dir / "SKILL.md"
+        skill_body.write_text("x" * 4000, encoding="utf-8")  # ~1000 tokens @ 4 B/tok
+
+        skill = self.record("feature", "skill")
+        skill["source_path"] = str(skill_body)
+        connector = self.record("myservice", "mcp")
+        connector["source_path"] = ""
+
+        policies = self.router_root / "policies"
+        policies.mkdir(exist_ok=True)
+        (policies / "demo.json").write_text(json.dumps({}), encoding="utf-8")
+        with mock.patch.object(self.registry, "ensure_router_config_valid", lambda: None):
+            result = self.registry.bundle(
+                [skill, connector], "feature", "codex", "demo", 8, self.output, estimate_savings=True
+            )
+
+        savings = result["savings"]
+        self.assertTrue(savings["estimated"])
+        self.assertEqual(savings["bytes_per_token"], 4)
+        # Only the skill body counts; the MCP connector contributes 0 tokens.
+        self.assertEqual(savings["eligible_body_tokens"], 1000)
+        self.assertGreaterEqual(savings["eligible_body_tokens"], savings["selected_body_tokens"])
+        self.assertEqual(
+            savings["avoided_body_tokens"],
+            savings["eligible_body_tokens"] - savings["selected_body_tokens"],
+        )
+
+
+class ContextSavingsHelperTest(unittest.TestCase):
+    """Unit-level guarantees for the savings estimator, independent of bundle()."""
+
+    @staticmethod
+    def _record(record_id: str, record_type: str, source_path: str = "") -> dict:
+        return {"id": record_id, "type": record_type, "name": record_id, "source_path": source_path}
+
+    def test_estimate_body_tokens_sizes_only_readable_bodies(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            temp = Path(raw)
+            body = temp / "SKILL.md"
+            body.write_text("y" * 400, encoding="utf-8")  # 100 tokens @ 4 B/tok
+            skill = self._record("skill:a", "skill", str(body))
+            self.assertEqual(registry.estimate_body_tokens(skill), 100)
+            # MCP/tool connectors are called, not read: no body-token cost.
+            self.assertEqual(registry.estimate_body_tokens(self._record("mcp:x", "mcp", str(body))), 0)
+            # A moved/missing source degrades to 0 instead of raising.
+            self.assertEqual(
+                registry.estimate_body_tokens(self._record("skill:gone", "skill", str(temp / "missing.md"))),
+                0,
+            )
+
+    def test_context_savings_counts_always_tokens_opt_in(self) -> None:
+        eligible = [self._record(f"skill:{i}", "skill") for i in range(10)]
+        selected = eligible[:3]
+        counts = registry.context_savings(eligible, selected, estimate_tokens=False)
+        self.assertEqual(
+            (counts["eligible_capabilities"], counts["selected_capabilities"], counts["avoided_capabilities"]),
+            (10, 3, 7),
+        )
+        self.assertFalse(counts["estimated"])
+        self.assertNotIn("avoided_body_tokens", counts)
+
+    def test_context_savings_never_reports_negative_avoided(self) -> None:
+        # Defensive: selected should be a subset of eligible, but a mismatch must
+        # never yield a nonsense negative "avoided" figure.
+        eligible = [self._record("skill:a", "skill")]
+        selected = [self._record("skill:a", "skill"), self._record("skill:b", "skill")]
+        summary = registry.context_savings(eligible, selected, estimate_tokens=True)
+        self.assertGreaterEqual(summary["avoided_capabilities"], 0)
+        self.assertGreaterEqual(summary["avoided_body_tokens"], 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

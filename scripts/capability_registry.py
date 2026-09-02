@@ -3649,8 +3649,106 @@ def policy_denies(pack: dict[str, Any], record: dict[str, Any]) -> bool:
     return False
 
 
+# Rough bytes-per-token divisor for English prose/markdown skill bodies. This is
+# a deliberately conservative, model-agnostic approximation (real BPE tokenizers
+# land near 3.5-4.5 B/tok on skill text); it exists to give an order-of-magnitude
+# feel for context saved, never a billing-grade count, so it stays stdlib-only.
+BODY_BYTES_PER_TOKEN = 4
+
+
+def readable_body_types() -> frozenset[str]:
+    """Capability types whose selection would pull a local body into the prompt.
+
+    MCP/tool/toolset entries are called as services, not read as instruction
+    bodies, so loading them costs a connector line, not a skill-body's worth of
+    context. Only these types contribute to the token-savings estimate.
+    """
+    return frozenset({"skill", "agent", "command", "entrypoint"})
+
+
+def estimate_body_tokens(record: dict[str, Any]) -> int:
+    """Estimate the prompt tokens a record's body would cost if fully loaded.
+
+    Uses the on-disk size of the source file (cheap stat, no read) divided by a
+    fixed bytes-per-token constant. Records without a readable local body (MCPs,
+    tools) or whose source has since moved contribute 0: they are not a
+    skill-body's worth of context. Never raises -- a missing/again-moved source
+    degrades to 0 rather than failing the route.
+    """
+    if record["type"] not in readable_body_types():
+        return 0
+    source_path = record.get("source_path") or ""
+    if not source_path:
+        return 0
+    try:
+        size = os.stat(Path(source_path).expanduser()).st_size
+    except OSError:
+        return 0
+    return size // BODY_BYTES_PER_TOKEN
+
+
+def context_savings(
+    eligible: list[dict[str, Any]],
+    selected: list[dict[str, Any]],
+    *,
+    estimate_tokens: bool,
+) -> dict[str, Any]:
+    """Quantify how much capability context routing avoids for this task.
+
+    The honest headline is the COUNT: of `eligible` capabilities the runtime
+    could load, routing selected `selected`. The token figures are an explicit
+    estimate (see BODY_BYTES_PER_TOKEN) and are only computed when
+    `estimate_tokens` is set, because sizing every eligible body costs a stat
+    per file (~0.1s at ~60k skills) that the default hot path should not pay.
+
+    Returns a JSON-friendly dict; `estimated` says whether token fields are
+    populated, so consumers never mistake an un-estimated run for "0 tokens".
+    """
+    eligible_count = len(eligible)
+    selected_count = len(selected)
+    avoided_count = max(eligible_count - selected_count, 0)
+    summary: dict[str, Any] = {
+        "eligible_capabilities": eligible_count,
+        "selected_capabilities": selected_count,
+        "avoided_capabilities": avoided_count,
+        "estimated": False,
+    }
+    if eligible_count:
+        summary["selected_fraction"] = round(selected_count / eligible_count, 4)
+    if not estimate_tokens:
+        return summary
+
+    selected_ids = {item["id"] for item in selected}
+    eligible_tokens = 0
+    selected_tokens = 0
+    for record in eligible:
+        tokens = estimate_body_tokens(record)
+        eligible_tokens += tokens
+        if record["id"] in selected_ids:
+            selected_tokens += tokens
+    avoided_tokens = max(eligible_tokens - selected_tokens, 0)
+    summary.update(
+        {
+            "estimated": True,
+            "bytes_per_token": BODY_BYTES_PER_TOKEN,
+            "eligible_body_tokens": eligible_tokens,
+            "selected_body_tokens": selected_tokens,
+            "avoided_body_tokens": avoided_tokens,
+        }
+    )
+    if eligible_tokens:
+        summary["avoided_token_fraction"] = round(avoided_tokens / eligible_tokens, 4)
+    return summary
+
+
 def bundle(
-    records: list[dict[str, Any]], query: str, runtime: str, project: str, max_count: int, output: Path
+    records: list[dict[str, Any]],
+    query: str,
+    runtime: str,
+    project: str,
+    max_count: int,
+    output: Path,
+    estimate_savings: bool = False,
 ) -> dict[str, Any]:
     ensure_router_config_valid()
     pack = policy_pack_for(project)
@@ -4049,6 +4147,11 @@ def bundle(
             }
     for item in selected:
         item.pop("semantic_key", None)
+    eligible_records = [
+        record
+        for record in records
+        if record_is_eligible(record, runtime) and not policy_denies(pack, record)
+    ]
     return {
         "status": "success" if selected else "warning",
         "summary": (
@@ -4059,6 +4162,7 @@ def bundle(
         "runtime": runtime,
         "project": project or None,
         "bundle": selected,
+        "savings": context_savings(eligible_records, selected, estimate_tokens=estimate_savings),
         "next_actions": [
             "Read every non-empty load_path before using that selected skill/agent/command.",
             "Invoke MCP/tool entries directly; activate toolsets first; plugins are used through exposed capabilities.",
@@ -4087,6 +4191,23 @@ def emit_bundle(result: dict[str, Any], as_json: bool) -> None:
     print("next_actions:")
     for action in result["next_actions"]:
         print(f"  - {action}")
+    savings = result.get("savings")
+    if savings:
+        selected_n = savings["selected_capabilities"]
+        eligible_n = savings["eligible_capabilities"]
+        avoided_n = savings["avoided_capabilities"]
+        line = (
+            f"context savings: loaded {selected_n} of {eligible_n} eligible "
+            f"capabilities ({avoided_n} kept out of context)"
+        )
+        if savings.get("estimated"):
+            avoided_tokens = savings["avoided_body_tokens"]
+            eligible_tokens = savings["eligible_body_tokens"]
+            line += (
+                f"; ~{avoided_tokens:,} of ~{eligible_tokens:,} body tokens avoided "
+                f"(est. @ {savings['bytes_per_token']} B/tok)"
+            )
+        print(line)
     print(f"artifacts: {result['artifacts']['index']}")
 
 
@@ -4798,6 +4919,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--project", help="Select a project configuration; accepted before or after the subcommand"
     )
     bundle_parser.add_argument("--max", type=int, default=8, dest="max_count", help="Portfolio size from 3 to 12")
+    bundle_parser.add_argument(
+        "--savings",
+        action="store_true",
+        dest="estimate_savings",
+        help="Estimate body tokens kept out of context (stats every eligible skill body; adds latency)",
+    )
     bundle_parser.add_argument("--json", action="store_true")
 
     check_parser = subparsers.add_parser("check", help="Verify inventory completeness and generated artifacts")
@@ -5031,7 +5158,13 @@ def main() -> int:
                     )
             ensure_query_registry_fresh(output)
             result = bundle(
-                load_registry(output), query, args.runtime, project, args.max_count, output
+                load_registry(output),
+                query,
+                args.runtime,
+                project,
+                args.max_count,
+                output,
+                estimate_savings=getattr(args, "estimate_savings", False),
             )
             emit_bundle(result, args.json)
         elif args.command == "check":

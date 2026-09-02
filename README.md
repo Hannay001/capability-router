@@ -39,9 +39,10 @@ summary: selected 6 complementary capabilities across 4 lanes
 [execution] tool: exec_command
 [verification] agent: code-reviewer
 [support] skill: python-patterns
+context savings: loaded 6 of 7,540 eligible capabilities (7,534 kept out of context)
 ```
 
-Exact entries depend on what you have installed. What `lockkeeper` guarantees is the structure: complementary lanes, a hard cap on portfolio size, and every entry filtered to what that runtime can actually execute.
+Exact entries depend on what you have installed. What `lockkeeper` guarantees is the structure: complementary lanes, a hard cap on portfolio size, and every entry filtered to what that runtime can actually execute. Every route reports the **context savings** (how many eligible capabilities it kept out of your prompt); add `--savings` to also estimate the skill-body tokens avoided.
 
 ## How it works
 

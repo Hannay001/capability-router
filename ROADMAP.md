@@ -88,7 +88,12 @@ local, dependency-free install-time firewall -- that gap is lockkeeper's niche.
 
 ## v2.x — Context-budget optimizer
 
-- Live per-capability token-cost accounting.
+- [x] Per-route context-savings report: every `route`/`bundle` shows how many
+      eligible capabilities were kept out of context; `--savings` adds an
+      estimate of skill-body tokens avoided (stdlib size/heuristic, opt-in on
+      the hot path). Exposed in human and JSON output under `savings`.
+- Live per-capability token-cost accounting (real tokenizer, not a byte
+  heuristic).
 - Auto-loading only the top-k relevant capabilities per task (router-driven),
   instead of everything at startup.
 
