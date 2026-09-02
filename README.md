@@ -44,30 +44,7 @@ context savings: loaded 6 of 7,540 eligible capabilities (7,534 kept out of cont
 
 Every route ends with that `context savings` line so the value is visible, not just claimed.
 
-Exact entries depend on what you have installed. What `lockkeeper` guarantees is the structure: complementary lanes, a hard cap on portfolio size, and every entry filtered to what that runtime can actually execute. Add `--savings` to also estimate the skill-body tokens kept out of your prompt.
-
-## Proof: your prompt stays flat as your toolbox grows
-
-The point of routing is that **a bigger library should not mean a bigger prompt.** Here is `lockkeeper route --savings` across six everyday tasks on a real machine with **58,109 eligible capabilities** (~77.7M tokens of skill bodies if you naively loaded them all):
-
-| Task | Capabilities loaded | Tokens in context | Kept out of context |
-|---|--:|--:|--:|
-| migrate the auth module to a new token API | 4 | ~8,900 | 99.99% |
-| audit a payment webhook for race conditions | 4 | ~4,400 | 99.99% |
-| write unit tests for a python data pipeline | 4 | ~9,400 | 99.99% |
-| review a react component for accessibility | 4 | ~10,400 | 99.99% |
-| debug a failing CI build on github actions | 6 | ~8,700 | 99.99% |
-| add rate limiting to a REST endpoint | 4 | ~13,800 | 99.98% |
-
-Median ~9,100 skill-body tokens in context instead of ~77.7M. The routed bundle stays in the **single-digit-thousands of tokens no matter how many capabilities you install**, because selection happens *before* the prompt, not after.
-
-Numbers are estimates (source-body bytes ÷ 4; MCP/tool connectors excluded since they are called, not read) and scale with your own library. Reproduce them on your machine:
-
-```sh
-lockkeeper rebuild
-python3 scripts/bench_context_savings.py            # the table above
-lockkeeper route --savings --runtime claude "review a python PR for security bugs"
-```
+Exact entries depend on what you have installed. What `lockkeeper` guarantees is the structure: complementary lanes, a hard cap on portfolio size, and every entry filtered to what that runtime can actually execute. Add `--savings` to also estimate the skill-body tokens kept out of your prompt, and see [Proof: your prompt stays flat as your toolbox grows](#proof-your-prompt-stays-flat-as-your-toolbox-grows) for real, reproducible numbers.
 
 ## How it works
 
@@ -212,6 +189,29 @@ python3 scripts/bench_context_savings.py   # regenerate the Proof table
 ```
 
 Requirements: Python 3.11+, no third-party dependencies in the core path. macOS, Linux, and Windows are all covered by CI (`ubuntu`, `macos`, `windows-latest`); see [docs/windows.md](docs/windows.md) for the Windows symlink-vs-junction notes.
+
+## Proof: your prompt stays flat as your toolbox grows
+
+The point of routing is that **a bigger library should not mean a bigger prompt.** Here is `lockkeeper route --savings` across six everyday tasks on a real machine with **58,109 eligible capabilities** (~77.7M tokens of skill bodies if you naively loaded them all):
+
+| Task | Capabilities loaded | Tokens in context | Kept out of context |
+|---|--:|--:|--:|
+| migrate the auth module to a new token API | 4 | ~8,900 | 99.99% |
+| audit a payment webhook for race conditions | 4 | ~4,400 | 99.99% |
+| write unit tests for a python data pipeline | 4 | ~9,400 | 99.99% |
+| review a react component for accessibility | 4 | ~10,400 | 99.99% |
+| debug a failing CI build on github actions | 6 | ~8,700 | 99.99% |
+| add rate limiting to a REST endpoint | 4 | ~13,800 | 99.98% |
+
+Median ~9,100 skill-body tokens in context instead of ~77.7M. The routed bundle stays in the **single-digit-thousands of tokens no matter how many capabilities you install**, because selection happens *before* the prompt, not after.
+
+Numbers are estimates (source-body bytes ÷ 4; MCP/tool connectors excluded since they are called, not read) and scale with your own library. Reproduce them on your machine:
+
+```sh
+lockkeeper rebuild
+python3 scripts/bench_context_savings.py            # the table above
+lockkeeper route --savings --runtime claude "review a python PR for security bugs"
+```
 
 ## Maintainer
 
