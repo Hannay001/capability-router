@@ -2,16 +2,16 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey.svg)](#development)
+[![platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#development)
 
 **The capability router and prompt-injection firewall for AI coding agents.**
 
 Lockkeeper indexes every skill, MCP server, plugin, tool, agent, and command installed across your coding agents (Claude Code, Codex, Cursor, Jcode, Hermes, OpenCode, Gemini, Copilot, Windsurf, Cline). It routes any task to a bounded portfolio of the right capabilities and screens everything that crosses your agent's boundary with a built-in injection firewall.
 
-Built and maintained by [Himanshu (@Hannay001)](https://github.com/Hannay001), with contributions welcome.
-
 > Your agent doesn't need all your installed capabilities in context.
 > It needs the right 8, verified safe, for *this* task.
+
+**Built and maintained by [Himanshu (@Hannay001)](https://github.com/Hannay001).** Contributions welcome. If Lockkeeper saves you context, a ⭐ helps other people find it.
 
 <p align="center">
   <img src="docs/demo-route.png" alt="lockkeeper bundle routing a payment-webhook audit task to two primary skills, flagged as untrusted external content" width="72%">
@@ -42,7 +42,32 @@ summary: selected 6 complementary capabilities across 4 lanes
 context savings: loaded 6 of 7,540 eligible capabilities (7,534 kept out of context)
 ```
 
-Exact entries depend on what you have installed. What `lockkeeper` guarantees is the structure: complementary lanes, a hard cap on portfolio size, and every entry filtered to what that runtime can actually execute. Every route reports the **context savings** (how many eligible capabilities it kept out of your prompt); add `--savings` to also estimate the skill-body tokens avoided.
+Every route ends with that `context savings` line so the value is visible, not just claimed.
+
+Exact entries depend on what you have installed. What `lockkeeper` guarantees is the structure: complementary lanes, a hard cap on portfolio size, and every entry filtered to what that runtime can actually execute. Add `--savings` to also estimate the skill-body tokens kept out of your prompt.
+
+## Proof: your prompt stays flat as your toolbox grows
+
+The point of routing is that **a bigger library should not mean a bigger prompt.** Here is `lockkeeper route --savings` across six everyday tasks on a real machine with **58,109 eligible capabilities** (~77.7M tokens of skill bodies if you naively loaded them all):
+
+| Task | Capabilities loaded | Tokens in context | Kept out of context |
+|---|--:|--:|--:|
+| migrate the auth module to a new token API | 4 | ~8,900 | 99.99% |
+| audit a payment webhook for race conditions | 4 | ~4,400 | 99.99% |
+| write unit tests for a python data pipeline | 4 | ~9,400 | 99.99% |
+| review a react component for accessibility | 4 | ~10,400 | 99.99% |
+| debug a failing CI build on github actions | 6 | ~8,700 | 99.99% |
+| add rate limiting to a REST endpoint | 4 | ~13,800 | 99.98% |
+
+Median ~9,100 skill-body tokens in context instead of ~77.7M. The routed bundle stays in the **single-digit-thousands of tokens no matter how many capabilities you install**, because selection happens *before* the prompt, not after.
+
+Numbers are estimates (source-body bytes ÷ 4; MCP/tool connectors excluded since they are called, not read) and scale with your own library. Reproduce them on your machine:
+
+```sh
+lockkeeper rebuild
+python3 scripts/bench_context_savings.py            # the table above
+lockkeeper route --savings --runtime claude "review a python PR for security bugs"
+```
 
 ## How it works
 
@@ -73,6 +98,7 @@ Lockkeeper is the missing layer between your task and your toolbox:
 |---|---|---|
 | Index and inventory | `lockkeeper rebuild`, `lockkeeper check` | ✅ shipped |
 | Task routing | `lockkeeper search`, `lockkeeper route` / `bundle` | ✅ shipped |
+| Context-savings report | `lockkeeper route --savings` | ✅ shipped |
 | Prompt-injection firewall | `lockkeeper audit`, `lockkeeper hook` | ✅ shipped (static + live) |
 | Signed audit receipts | `--receipt-out` / `--verify-receipt` | ✅ shipped |
 | Dependency CVE gate | `--check-deps` (osv.dev) | ✅ shipped |
@@ -182,9 +208,14 @@ The optional semantic sidecar (`embedder/`) adds embedding re-ranking on top of 
 HOME="$(mktemp -d)" python3.11 -m unittest discover -s tests -p "test_*.py" -t .
 ruff check .
 python3 scripts/cap_audit.py            # self-audit
+python3 scripts/bench_context_savings.py   # regenerate the Proof table
 ```
 
-Requirements: Python 3.11+, no third-party dependencies in the core path. macOS and Linux are first-class today; Windows works under WSL, native support is on the roadmap.
+Requirements: Python 3.11+, no third-party dependencies in the core path. macOS, Linux, and Windows are all covered by CI (`ubuntu`, `macos`, `windows-latest`); see [docs/windows.md](docs/windows.md) for the Windows symlink-vs-junction notes.
+
+## Maintainer
+
+Lockkeeper is built and maintained by **[Himanshu (@Hannay001)](https://github.com/Hannay001)**. Issues, ideas, and PRs are welcome. If it saves you context or catches something nasty, a ⭐ genuinely helps.
 
 ## Security
 
