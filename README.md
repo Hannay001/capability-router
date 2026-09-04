@@ -220,10 +220,6 @@ lockkeeper route --savings --runtime claude "review a python PR for security bug
 
 Lockkeeper is built and maintained by **[Himanshu (@Hannay001)](https://github.com/Hannay001)**. Issues, ideas, and PRs are welcome. If it saves you context or catches something nasty, a ⭐ genuinely helps.
 
-## Contributors
-
-Development, testing, and documentation were supported by **[Claude Code by Anthropic](https://github.com/anthropics/claude-code)**.
-
 ## Security
 
 Found a bypass or vulnerability? Please report privately per [SECURITY.md](SECURITY.md) rather than opening a public issue.
