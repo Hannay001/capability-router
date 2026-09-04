@@ -125,6 +125,9 @@ Beyond static files, register the firewall as a Claude Code hook and hostile too
 ```
 
 Works with any harness that supports stdin JSON hooks (Claude Code, Codex, ...).
+The live hook fails closed on oversized input and on any `high` or `critical`
+finding. Medium-only `suspect` traffic is allowed with a warning to avoid turning
+low-confidence signals into a noisy execution blocker.
 
 ## Install
 

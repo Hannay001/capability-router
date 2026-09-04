@@ -72,7 +72,44 @@ local, dependency-free install-time firewall -- that gap is lockkeeper's niche.
       level ranking is already saturated at personal-registry scale;
       revisit only above ~50K overlapping skills or with a learned encoder.
 
-## v1.2 — Install & lock (`lockkeeper install`, `cap.lock`)
+## v1.1.2 — Security and release-integrity patch
+
+The September 2026 repository audit found six concrete fail-open or release
+integrity defects. The fixes are intentionally narrow so they can ship before
+the next feature release.
+
+- [x] Reject a symlink or Windows junction used as the top-level recursive audit
+      target, preventing an audit (and opt-in LLM scan) from escaping into
+      unrelated local files.
+- [x] Block hook payloads that exceed the scan limit instead of allowing an
+      uninspected tail.
+- [x] Block any hook payload with a high/critical finding; medium-only
+      `suspect` content remains warning-only to control false positives.
+- [x] Make receipt verification short-circuit before scan work, so verification
+      never scans or transmits the current directory unexpectedly.
+- [x] Keep malformed `package.json` input from crashing `--check-deps`.
+- [x] Correct package metadata to `1.1.2` and modern SPDX/setuptools fields.
+- [ ] Confirm the full Linux/macOS/Windows CI and wheel smoke matrix, then tag
+      and publish `v1.1.2`.
+
+## v1.2 — Pre-prompt activation and measurable context budgets
+
+The strongest launch signal was not “more skill storage.” It was that selection
+must happen **before the prompt** or the catalog simply becomes another pile.
+
+- One-command adapters for Claude Code, Codex, Cursor, Jcode, Hermes, and
+  OpenCode that call `lockkeeper route` before capability bodies enter context.
+- Per-runtime context budgets with explicit fallback behavior when routing
+  confidence is low.
+- A first-class `lockkeeper explain` view: what was eligible, selected, rejected,
+  and how many body bytes/tokens each decision cost.
+- Standards-compatible import adapters for the formats people already use
+  (`SKILL.md`, `AGENTS.md`, MCP configs, shared Git folders), without inventing
+  another hosted capability format.
+- Re-run the context-savings benchmark in CI on deterministic fixtures and
+  publish the artifact, so the README proof cannot silently drift.
+
+## v1.3 — Install & lock (`lockkeeper install`, `cap.lock`)
 
 - Sources: git URL, tarball, local path.
 - Pipeline: fetch → audit gate → verify hash → place into selected runtime
@@ -80,13 +117,13 @@ local, dependency-free install-time firewall -- that gap is lockkeeper's niche.
 - `cap.lock` pins origin commit + content hash + audit verdict per capability.
 - Runtime targets: `claude`, `codex`, `cursor`, `opencode`, `jcode`, `hermes`.
 
-## v1.3 — Remote discovery
+## v1.4 — Remote discovery
 
 - `lockkeeper search <query> --remote`: GitHub API aggregator over topic-indexed skill
   repos (no central server to operate).
 - Audit-on-search: remote results show cached/static verdicts before install.
 
-## v2.x — Context-budget optimizer
+## v2.x — Large-catalog optimizer
 
 - [x] Per-route context-savings report: every `route`/`bundle` shows how many
       eligible capabilities were kept out of context; `--savings` adds an
@@ -94,17 +131,20 @@ local, dependency-free install-time firewall -- that gap is lockkeeper's niche.
       the hot path). Exposed in human and JSON output under `savings`.
 - Live per-capability token-cost accounting (real tokenizer, not a byte
   heuristic).
-- Auto-loading only the top-k relevant capabilities per task (router-driven),
-  instead of everything at startup.
+- Learned/semantic routing only where measured catalog scale and ambiguity beat
+  the dependency-free lexical path.
 
 ## Hardening backlog (from the Aug 2026 deep audit)
 
-Fixed in v1.1.x: long-line scan bypass (chunked windows), env-var
+Fixed in v1.1.x/v1.1.2: long-line scan bypass (chunked windows), env-var
 interpolation exfiltration rule, credential-upload exfil rule,
 suppression-marker fail-open floor, stacked hidden-text floor, hook stdin
 cap, LLM-tier https-only + redacted egress, receipt-key O_EXCL|O_NOFOLLOW
 creation, atomic-write mode clamp, RecursionError-safe JSON parsing, and
-the mixed-type registry trust check that bricked read verbs.
+the mixed-type registry trust check that bricked read verbs. The September
+follow-up also closed top-level audit-root symlink traversal, oversized hook
+fail-open behavior, single-high hook bypasses, receipt-verification pre-scans,
+malformed npm-manifest crashes, and stale package version metadata.
 
 Deferred (documented design limits / tuning):
 - Router ranking: grow alias coverage beyond ~8% of records; add a
@@ -114,6 +154,11 @@ Deferred (documented design limits / tuning):
   continuations, base64/openssl without a pipe, fullwidth-Latin homoglyphs.
 - Local-trust hardening: prefer absolute harness CLI paths over PATH
   lookup; verify sidecar interpreter ownership before execution.
+- Filesystem race hardening: move audit and optional LLM reads to descriptor-
+  based no-follow reads where platforms support them, with identity rechecks on
+  Windows.
+- Release engineering: [x] tag-to-package-version gate. Next add an automated,
+  attestable publish workflow with provenance.
 
 ## Non-goals
 

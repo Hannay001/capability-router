@@ -3,9 +3,34 @@ name: tests
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
 
 jobs:
+  release-version:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+      - name: Verify tag matches package version
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import tomllib
+
+          package_version = tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"]
+          tag_version = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          if package_version != tag_version:
+              raise SystemExit(
+                  f"release tag v{tag_version} does not match pyproject version {package_version}"
+              )
+          print(f"release version verified: {package_version}")
+          PY
   unittest:
     runs-on: ${{ matrix.os }}
     strategy:

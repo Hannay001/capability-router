@@ -546,9 +546,22 @@ def _verdict(findings: list[Finding], suppressed_lines: int = 0) -> str:
     return "clean"
 
 
+def _is_link_like(path: Path) -> bool:
+    """Return true for symlinks and Windows junction/reparse directory links."""
+    try:
+        if path.is_symlink():
+            return True
+        is_junction = getattr(path, "is_junction", None)
+        return bool(is_junction is not None and is_junction())
+    except OSError:
+        # If link metadata cannot be established, the security scanner should
+        # not follow the path and hope it is regular.
+        return True
+
+
 def audit_path(path: Path) -> Optional[FileReport]:
     resolved = path.expanduser()
-    if resolved.is_symlink():
+    if _is_link_like(resolved):
         # A symlinked file can point anywhere (e.g. ~/.ssh/id_rsa); auditing it  # cap-audit-suppress
         # would hash and excerpt out-of-scope content.
         return None
@@ -632,6 +645,12 @@ def audit_targets(
     skipped: list[str] = []
     for target in targets:
         target = target.expanduser()
+        if _is_link_like(target):
+            # A directory symlink used as the audit root otherwise makes its
+            # descendants look like ordinary files and can escape the scope
+            # the operator selected.
+            skipped.append(str(target))
+            continue
         if not target.exists():
             skipped.append(str(target))
             continue
@@ -696,7 +715,7 @@ def parse_dependency_manifests(text: str, filename: str) -> tuple[list[tuple[str
         try:
             data = json.loads(text)
         except (ValueError, RecursionError):
-            return deps
+            return deps, unpinned
         if isinstance(data, dict):
             for section in ("dependencies", "devDependencies"):
                 entries = data.get(section)
@@ -751,7 +770,7 @@ def dependency_findings(target: Path) -> tuple[list[Finding], list[str]]:
     for candidate in sorted(resolved.rglob("*")):
         if "__pycache__" in candidate.parts or candidate.name not in ("requirements.txt", "package.json"):
             continue
-        if not candidate.is_file() or candidate.is_symlink():
+        if not candidate.is_file() or _is_link_like(candidate):
             continue
         try:
             text = candidate.read_text(encoding="utf-8-sig", errors="ignore")
@@ -1314,9 +1333,10 @@ def main_hook(argv: Optional[list[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     raw = sys.stdin.read(HOOK_MAX_STDIN_BYTES + 1)
-    if len(raw) > HOOK_MAX_STDIN_BYTES:
-        # Oversized payloads are scanned truncated and flagged: the hook must
-        # stay available even when a tool call ships megabytes of content.
+    input_oversized = len(raw) > HOOK_MAX_STDIN_BYTES
+    if input_oversized:
+        # Keep memory bounded, scan the available prefix for diagnostics, and
+        # add a high-severity finding below so the uninspected tail fails closed.
         raw = raw[:HOOK_MAX_STDIN_BYTES]
         print(
             "lockkeeper hook: payload exceeded "
@@ -1339,6 +1359,18 @@ def main_hook(argv: Optional[list[str]] = None) -> int:
     # Hook payloads are always untrusted: suppression markers stay inert even
     # when the harness happens to run from cap's own checkout.
     report = audit_bytes(Path(f"<hook:{tool_name}>"), body.encode("utf-8"), allow_suppression=False)
+    if input_oversized:
+        report.findings.append(
+            Finding(
+                rule_id="hook_input_oversized",
+                severity="high",
+                title="Hook payload exceeded the scan limit; unscanned content was blocked",
+                line=0,
+                excerpt=f"size>{HOOK_MAX_STDIN_BYTES}",
+            )
+        )
+        if report.verdict == "clean":
+            report.verdict = "suspect"
     if args.json:
         print(
             json.dumps(
@@ -1353,8 +1385,11 @@ def main_hook(argv: Optional[list[str]] = None) -> int:
         )
     else:
         emit([report], False)
-    if report.verdict == "hostile":
-        print(f"lockkeeper hook: blocked {tool_name} (hostile content)", file=sys.stderr)
+    high_risk = report.verdict == "hostile" or any(
+        finding.severity in {"high", "critical"} for finding in report.findings
+    )
+    if high_risk:
+        print(f"lockkeeper hook: blocked {tool_name} (high-risk content)", file=sys.stderr)
         return 2
     if report.verdict == "suspect":
         print("lockkeeper hook: suspect content allowed; review recommended", file=sys.stderr)

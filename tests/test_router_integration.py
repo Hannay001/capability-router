@@ -30,7 +30,25 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import capability_registry as registry  # noqa: E402
+import cap_audit  # noqa: E402
 import router_config  # noqa: E402
+
+
+class StandaloneAuditCommandTest(unittest.TestCase):
+    def test_receipt_verification_does_not_scan_the_current_directory(self) -> None:
+        with mock.patch.object(cap_audit, "run_audit_flow") as run_audit_flow:
+            with mock.patch.object(
+                cap_audit,
+                "verify_receipt_file",
+                return_value=(True, "receipt valid"),
+            ):
+                code = registry._run_standalone(
+                    "audit",
+                    ["audit", "--verify-receipt", "receipt.json", "--receipt-key", "key.hex"],
+                )
+
+        self.assertEqual(code, 0)
+        run_audit_flow.assert_not_called()
 
 
 def python_major_minor(python: Path) -> tuple[int, int] | None:

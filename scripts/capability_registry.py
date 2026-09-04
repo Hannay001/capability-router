@@ -5015,14 +5015,6 @@ def _run_standalone(command: str, argv: list[str]) -> int:
         from cap_audit import STRICT_EXIT_CODES, emit, overall_verdict, run_audit_flow
 
         args = build_parser().parse_args([*stripped])
-        targets = getattr(args, "targets", []) or [Path(".")]
-        reports, skipped = run_audit_flow(
-            targets,
-            recursive=getattr(args, "recursive", False),
-            check_deps=getattr(args, "check_deps", False),
-            llm_scan=getattr(args, "llm_scan", False),
-        )
-        emit(reports, getattr(args, "json", False), skipped)
         # Verification short-circuits before any scan work.
         if getattr(args, "verify_receipt", None):
             from cap_audit import verify_files_against_receipt, verify_receipt_file
@@ -5039,6 +5031,14 @@ def _run_standalone(command: str, argv: list[str]) -> int:
                 print(files_message)
                 return 0 if files_ok else 1
             return 0
+        targets = getattr(args, "targets", []) or [Path(".")]
+        reports, skipped = run_audit_flow(
+            targets,
+            recursive=getattr(args, "recursive", False),
+            check_deps=getattr(args, "check_deps", False),
+            llm_scan=getattr(args, "llm_scan", False),
+        )
+        emit(reports, getattr(args, "json", False), skipped)
         if getattr(args, "receipt_out", None):
             from cap_audit import write_receipt_file
 
